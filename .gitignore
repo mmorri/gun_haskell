@@ -1,0 +1,35 @@
+# Stack
+.stack-work/
+stack.yaml.lock
+
+# Build artifacts
+dist/
+dist-newstyle/
+cabal-dev
+*.o
+*.hi
+*.chi
+*.chs.h
+*.dyn_o
+*.dyn_hi
+.virtualenv
+.hpc
+.hsenv
+.cabal-sandbox/
+cabal.sandbox.config
+*.prof
+*.aux
+*.hp
+*.eventlog
+.HTF/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# freeglut downloads
+freeglut/
+freeglut-MSVC.zip
