@@ -1,70 +1,67 @@
-# Sentry Gun Tower Defense
+# Sentry Gun: Pew-Pew Defense Deluxe
 
-A tower defense game written in Haskell using the Gloss graphics library.
+A tower defense game written in Haskell using Gloss — now with 200% more sparkles and 100% more gremlins!
 
-## Features
+Protect ur base (pls) from the Zoomie Gremlins pouring out of the gremlin hole.
 
-- **Round-based gameplay** with increasing difficulty
-- **4 different gun types** with unique stats
-- **Point system** - earn money by killing enemies
-- **Visual bullet system** with muzzle flash effects
-- **Grid-based gun placement** with live preview
-- **Hungarian Algorithm upgrade** - unlock optimal gun-enemy targeting for $100
-- **Progressive difficulty** - enemies get bigger and more numerous each round
+## Highlights
+
+- Round-based gameplay with escalating mixed enemy waves
+- Starry battlefield, sandy candy road, pulsing portal + beating-heart base
+- Googly-eyed turrets with distinct personalities + level stars
+- Derpy enemies with faces, health bars, and emotional damage (`!!` when low)
+- Neon bullet tracers, starburst muzzle flashes with `PEW!`
+- Grid-based tower placement with path/overlap validation
+- Tower upgrades aka protein shakes (right-click in shop phase)
+- Target Gossip modes: Closest Bozo / Front of Conga Line / Bully the Smoll / Big Chungus First
+- Big Brain Mode™ upgrade for global tower-enemy matching
+- Funny rotating tips, pause snack-break screen, tragic `BASE GOT SNACC'D!` game over
+- Fast-forward espresso mode (`F`) and disco range lights (`R`)
+
+## Enemy Types
+
+- **Zoomie Gremlin (Swarm)**: fragile, fast, low reward. Says "zoom".
+- **Espresso Goblin (Runner)**: medium health, very fast, sweating.
+- **Dump Truck Chungus (Brute)**: tanky, armored, splits into smaller units on death like bad gossip. Wears a tiny crown.
 
 ## Gun Types
 
-- **Basic Turret** ($50) - Balanced all-around turret
-- **Sniper Tower** ($100) - Long range, high damage, slow fire rate
-- **Rapid Fire** ($80) - Short range, low damage, very fast
-- **Heavy Cannon** ($150) - Medium range, very high damage
-
-## Upgrades
-
-- **Hungarian Targeting Algorithm** ($100) - Optimizes gun-enemy assignment for maximum efficiency
+- **Pew-Pew Turret** ($50): reliable, like socks. Balanced all-rounder.
+- **No-Scope Nanny** ($100): 360 no-scope granny. High range + damage, slow.
+- **BRRRT Machine** ($80): caffeine incarnate. Short range, low damage, high fire rate.
+- **YEET Cannon** ($150): diplomatic solution. Medium range, high burst.
 
 ## How to Play
 
-1. **Shop Phase**: Click guns to select, then click battlefield to place them
-2. Press **SPACE** to start the combat round
-3. **Combat Phase**: Watch your guns automatically shoot enemies
-4. Earn points for each kill
-5. Return to shop between rounds to buy more guns or upgrades
-6. Survive as long as possible!
-
-## Building and Running
-
-### Prerequisites
-
-- Stack (Haskell build tool)
-- On Windows: freeglut DLL (automatically downloaded during first build)
-
-### Build
-
-```bash
-stack build
-```
-
-### Run
-
-```bash
-stack run
-```
+1. In **Shop Phase**, click a tower button then click the battlefield to adopt it.
+2. Press **SPACE** to unleash the wave.
+3. During combat, towers shoot automatically (pew pew!).
+4. Between rounds, buy towers, right-click to feed them steroids, and tune targeting gossip.
+5. Survive as many rounds as possible before base gets snacc'd.
 
 ## Controls
 
-- **Mouse**: Select guns and place them on battlefield
-- **SPACE**: Start round (in shop) / Pause (in combat)
-- **Q**: Quit
+- **Mouse Left**: select tower / place tower (click = adopt!)
+- **Mouse Right (shop phase)**: upgrade tower under cursor
+- **SPACE**: start round (shop) / pause for snacks (combat)
+- **T**: cycle target gossip
+- **R**: toggle disco range lights
+- **F**: toggle espresso speed (1x/2x)
+- **Q**: cry quietly
 
-## Technical Features
+## Build
 
-- Pure functional Haskell implementation
-- Gloss-based 2D graphics
-- Real-time bullet physics
-- Optimal assignment algorithm (Hungarian method)
-- Grid snapping for precise placement
-- Live placement preview with range visualization
+```bash
+stack build
+stack run
+```
+
+Note: On Linux, you may need OpenGL/GLUT dev libs for Gloss:
+`sudo apt install freeglut3-dev libgl1-mesa-dev libglu1-mesa-dev`
+
+Note: On Ubuntu 25.10+ (binutils 2.44+, no `ld.gold`), the build uses `-optl-fuse-ld=bfd`
+(already set in `sentry-gun.cabal`). If linking fails with `cannot find 'ld'`, build with:
+`stack build --ghc-options="-optl-fuse-ld=bfd"`
 
 ## License
 

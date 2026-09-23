@@ -33,6 +33,7 @@ executable sentry-gun
                        -Wmissing-home-modules
                        -Wpartial-fields
                        -Wredundant-constraints
+                       -optl-fuse-ld=bfd
 
 source-repository head
   type:     git

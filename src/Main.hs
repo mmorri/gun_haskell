@@ -5,37 +5,34 @@ import Graphics.Gloss.Interface.Pure.Game
 import Game (SimulationState, initSimulation, stepSimulation)
 import Render (drawState, handleEventGloss)
 
--- | Window configuration
 window :: Display
-window = InWindow "Sentry Gun Tower Defense" (1000, 600) (100, 100)
+window = InWindow "Sentry Gun: Pew-Pew Defense Deluxe" (1000, 600) (100, 100)
 
--- | Background color
 background :: Color
-background = makeColor 0.1 0.1 0.15 1.0
+background = makeColor 0.07 0.08 0.14 1.0
 
--- | Frames per second
 fps :: Int
 fps = 60
 
 main :: IO ()
 main = do
-  putStrLn "=== Sentry Gun Tower Defense ==="
+  putStrLn "=== Sentry Gun: Pew-Pew Defense Deluxe ==="
+  putStrLn "  * Now with 200% more sparkles and 100% more gremlins! *"
   putStrLn ""
-  putStrLn "How to Play:"
-  putStrLn "  - SHOP PHASE: Click guns to select, click battlefield to place"
-  putStrLn "  - Press SPACE to start the combat round"
-  putStrLn "  - COMBAT PHASE: Watch your guns defend against waves of enemies"
-  putStrLn "  - Press SPACE to pause/unpause during combat"
-  putStrLn "  - Earn points by killing enemies, lose lives when enemies escape"
-  putStrLn "  - Each round has more and tougher enemies!"
+  putStrLn "How to Play (brave commander of cardboard boxes):"
+  putStrLn "  - SHOP: Left-click to adopt a turret (they bite, lovingly)"
+  putStrLn "  - SHOP: Right-click a placed tower to feed it steroids (upgrade)"
+  putStrLn "  - Press SPACE to unleash the wave / pause for snacks"
+  putStrLn "  - Press T to change targeting gossip (who gets yeeted first?)"
+  putStrLn "  - Press R to toggle range disco lights"
+  putStrLn "  - Press F to toggle hyper-caffeinated mode (1x/2x)"
+  putStrLn "  - Earn cash from kills; stop the Zoomie Gremlins from hugging your base"
   putStrLn ""
-  putStrLn "Starting game..."
+  putStrLn "Starting game... pew pew!"
 
   let initialState = initSimulation [] []
 
   play window background fps initialState drawState handleEventGloss updateWorld
 
--- | Update function for Gloss
 updateWorld :: Float -> SimulationState -> SimulationState
 updateWorld dt = stepSimulation (realToFrac dt)
-

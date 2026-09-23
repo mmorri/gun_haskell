@@ -4,56 +4,69 @@ module Game
   , GamePhase(..)
   , GunTemplate(..)
   , TargetingAlgorithm(..)
+  , TargetingMode(..)
   , initSimulation
   , stepSimulation
   , simulateOnce
   , startNextRound
   , addGunAtPosition
   , canAffordGun
+  , canPlaceGunAt
   , availableGuns
   , unlockAdvancedAlgorithm
   , algorithmUpgradeCost
+  , toggleRangeIndicators
+  , toggleSimulationSpeed
+  , cycleTargetingMode
+  , upgradeGunAtPosition
   ) where
 
-import Gun (Gun(..), distanceToEnemy, canShoot, tickCooldown, fireAt)
-import Enemy (Enemy(..), moveEnemy)
-import Bullet (Bullet(..), moveBullet, createBullet)
-import Data.List (minimumBy)
+import Bullet (Bullet(..), createBullet, moveBullet)
+import Data.List (minimumBy, partition)
 import Data.Ord (comparing)
+import Enemy (Enemy(..), EnemyType(..), distance, enemyReachedGoal, moveEnemyAlongPath)
+import Gun (Gun(..), canUpgrade, distanceToEnemy, tickCooldown, upgradeCost, upgradeGun)
 
--- | Game phase determines what the player can do
+-- | Game phase determines what the player can do.
 data GamePhase
-  = ShopPhase      -- Player can buy and place guns
-  | CombatPhase    -- Simulation running, enemies spawning
-  | GameOver       -- All lives lost
+  = ShopPhase
+  | CombatPhase
+  | GameOver
   deriving (Show, Eq)
 
--- | Targeting algorithm types
+-- | Algorithm-level enemy assignment policy.
 data TargetingAlgorithm
-  = GreedyNearest      -- Simple: each gun shoots nearest enemy (default)
-  | HungarianOptimal   -- Advanced: optimal assignment using Hungarian algorithm
+  = GreedyNearest
+  | HungarianOptimal
   deriving (Show, Eq)
 
--- | Gun templates available for purchase
+-- | Priority rules for selecting which enemy to shoot.
+data TargetingMode
+  = TargetNearest
+  | TargetFirst
+  | TargetWeakest
+  | TargetStrongest
+  deriving (Show, Eq, Enum, Bounded)
+
+-- | Gun templates available for purchase.
 data GunTemplate = GunTemplate
-  { templateName  :: String
-  , templateCost  :: Int
+  { templateName :: String
+  , templateCost :: Int
   , templateRange :: Double
   , templateCooldown :: Double
   , templateDamage :: Double
   } deriving (Show, Eq)
 
--- | Cost to unlock the advanced targeting algorithm
 algorithmUpgradeCost :: Int
 algorithmUpgradeCost = 100
 
--- | Simulation state holds guns, enemies, bullets, round info, and game phase
+-- | Simulation state for gameplay and UI.
 data SimulationState = SimulationState
-  { simGuns    :: [Gun]
+  { simGuns :: [Gun]
   , simEnemies :: [Enemy]
   , simBullets :: [Bullet]
-  , simTime    :: Double
-  , simPaused  :: Bool
+  , simTime :: Double
+  , simPaused :: Bool
   , currentRound :: Int
   , points :: Int
   , lives :: Int
@@ -64,19 +77,37 @@ data SimulationState = SimulationState
   , enemiesSpawnedThisRound :: Int
   , enemiesToSpawnThisRound :: Int
   , spawnTimer :: Double
+  , spawnQueue :: [EnemyType]
   , selectedGun :: Maybe GunTemplate
-  , gunMuzzleFlashes :: [(Int, Double)]  -- (gunId, timeRemaining)
+  , gunMuzzleFlashes :: [(Int, Double)]
   , targetingAlgorithm :: TargetingAlgorithm
-  , mousePosition :: (Float, Float)  -- Track mouse for placement preview
+  , targetingMode :: TargetingMode
+  , mousePosition :: (Float, Float)
+  , mapPath :: [(Double, Double)]
+  , showRanges :: Bool
+  , simulationSpeed :: Double
+  , totalKills :: Int
+  , totalLeaks :: Int
+  , totalSpent :: Int
   } deriving (Show)
 
--- | List of available gun types
 availableGuns :: [GunTemplate]
 availableGuns =
-  [ GunTemplate "Basic Turret" 50 120 1.0 6
-  , GunTemplate "Sniper Tower" 100 200 2.0 15
-  , GunTemplate "Rapid Fire" 80 100 0.5 4
-  , GunTemplate "Heavy Cannon" 150 150 1.5 20
+  [ GunTemplate "Pew-Pew Turret" 50 120 1.0 6
+  , GunTemplate "No-Scope Nanny" 100 210 2.0 15
+  , GunTemplate "BRRRT Machine" 80 95 0.45 4
+  , GunTemplate "YEET Cannon" 150 150 1.4 20
+  ]
+
+defaultPath :: [(Double, Double)]
+defaultPath =
+  [ (-430, -210)
+  , (-320, -120)
+  , (-180, -140)
+  , (-40, -40)
+  , (100, 20)
+  , (250, 80)
+  , (420, 180)
   ]
 
 initSimulation :: [Gun] -> [Enemy] -> SimulationState
@@ -87,8 +118,8 @@ initSimulation gs es = SimulationState
   , simTime = 0
   , simPaused = False
   , currentRound = 1
-  , points = 100  -- Starting money
-  , lives = 10
+  , points = 100
+  , lives = 15
   , gamePhase = ShopPhase
   , nextGunId = 1
   , nextEnemyId = 1
@@ -96,186 +127,293 @@ initSimulation gs es = SimulationState
   , enemiesSpawnedThisRound = 0
   , enemiesToSpawnThisRound = 0
   , spawnTimer = 0
+  , spawnQueue = []
   , selectedGun = Nothing
   , gunMuzzleFlashes = []
-  , targetingAlgorithm = GreedyNearest  -- Start with basic algorithm
+  , targetingAlgorithm = GreedyNearest
+  , targetingMode = TargetNearest
   , mousePosition = (0, 0)
+  , mapPath = defaultPath
+  , showRanges = True
+  , simulationSpeed = 1.0
+  , totalKills = 0
+  , totalLeaks = 0
+  , totalSpent = 0
   }
 
--- | Unlock the advanced targeting algorithm
 unlockAdvancedAlgorithm :: SimulationState -> SimulationState
 unlockAdvancedAlgorithm state
+  | targetingAlgorithm state == HungarianOptimal = state
   | points state >= algorithmUpgradeCost =
-      state { targetingAlgorithm = HungarianOptimal
-            , points = points state - algorithmUpgradeCost
-            }
-  | otherwise = state
-
--- | Check if player can afford a gun
-canAffordGun :: GunTemplate -> SimulationState -> Bool
-canAffordGun template state = points state >= templateCost template
-
--- | Add a gun at the specified position
-addGunAtPosition :: GunTemplate -> (Double, Double) -> SimulationState -> SimulationState
-addGunAtPosition template position state
-  | canAffordGun template state =
-      let newGun = Gun
-            { gunId = nextGunId state
-            , gpos = position
-            , range = templateRange template
-            , cooldownTime = templateCooldown template
-            , currentCd = 0
-            , damagePerShot = templateDamage template
-            }
-      in state
-        { simGuns = newGun : simGuns state
-        , points = points state - templateCost template
-        , nextGunId = nextGunId state + 1
+      state
+        { targetingAlgorithm = HungarianOptimal
+        , points = points state - algorithmUpgradeCost
+        , totalSpent = totalSpent state + algorithmUpgradeCost
         }
   | otherwise = state
 
--- | Calculate enemies for a round (more enemies, higher health as rounds progress)
+canAffordGun :: GunTemplate -> SimulationState -> Bool
+canAffordGun template state = points state >= templateCost template
+
+toggleRangeIndicators :: SimulationState -> SimulationState
+toggleRangeIndicators s = s { showRanges = not (showRanges s) }
+
+toggleSimulationSpeed :: SimulationState -> SimulationState
+toggleSimulationSpeed s =
+  s { simulationSpeed = if simulationSpeed s < 1.5 then 2.0 else 1.0 }
+
+cycleTargetingMode :: SimulationState -> SimulationState
+cycleTargetingMode s =
+  let mode = targetingMode s
+      nextMode
+        | mode == maxBound = minBound
+        | otherwise = succ mode
+  in s { targetingMode = nextMode }
+
+canPlaceGunAt :: (Double, Double) -> SimulationState -> Bool
+canPlaceGunAt position state =
+  inBounds position
+    && not (occupied position (simGuns state))
+    && not (intersectsPath position (mapPath state))
+  where
+    inBounds (x, y) = abs x <= 450 && abs y <= 270
+    occupied p gs = any (\g -> distance p (gpos g) < 30) gs
+
+    intersectsPath p path =
+      let segments = zip path (drop 1 path)
+      in any (\(a, b) -> pointToSegmentDistance p a b < 28) segments
+
+addGunAtPosition :: GunTemplate -> (Double, Double) -> SimulationState -> SimulationState
+addGunAtPosition template position state
+  | canAffordGun template state && canPlaceGunAt position state =
+      let newGun =
+            Gun
+              { gunId = nextGunId state
+              , gunName = templateName template
+              , gpos = position
+              , range = templateRange template
+              , cooldownTime = templateCooldown template
+              , currentCd = 0
+              , damagePerShot = templateDamage template
+              , gunLevel = 1
+              }
+      in state
+           { simGuns = newGun : simGuns state
+           , points = points state - templateCost template
+           , nextGunId = nextGunId state + 1
+           , totalSpent = totalSpent state + templateCost template
+           }
+  | otherwise = state
+
+upgradeGunAtPosition :: (Double, Double) -> SimulationState -> SimulationState
+upgradeGunAtPosition clickPos state
+  | gamePhase state /= ShopPhase = state
+  | otherwise =
+      case findClosestGun clickPos (simGuns state) of
+        Nothing -> state
+        Just g
+          | not (canUpgrade g) -> state
+          | points state < upgradeCost g -> state
+          | otherwise ->
+              let upgraded = upgradeGun g
+                  replaceGun old new = map (\x -> if gunId x == gunId old then new else x)
+                  cost = upgradeCost g
+              in state
+                   { simGuns = replaceGun g upgraded (simGuns state)
+                   , points = points state - cost
+                   , totalSpent = totalSpent state + cost
+                   }
+  where
+    findClosestGun p gs =
+      let candidates = filter (\g -> distance p (gpos g) <= 18) gs
+      in case candidates of
+           [] -> Nothing
+           _ -> Just (minimumBy (comparing (distance p . gpos)) candidates)
+
+-- | Calculate enemies for a round.
 enemiesForRound :: Int -> Int
-enemiesForRound round = 5 + (round - 1) * 3
+enemiesForRound roundNum = 6 + (roundNum - 1) * 3
 
--- | Calculate enemy health for a round
-enemyHealthForRound :: Int -> Double
-enemyHealthForRound round = 10 + fromIntegral (round - 1) * 5
+waveForRound :: Int -> [EnemyType]
+waveForRound roundNum =
+  let total = enemiesForRound roundNum
+      bruteCount = min (total `div` 3) (max 0 (roundNum - 2))
+      runnerCount = min (total - bruteCount) (1 + roundNum)
+      swarmCount = max 0 (total - bruteCount - runnerCount)
+      swarms = replicate swarmCount Swarm
+      runners = replicate runnerCount Runner
+      brutes = replicate bruteCount Brute
+  in interleave [swarms, runners, brutes]
+  where
+    interleave xs =
+      case filter (not . null) xs of
+        [] -> []
+        ys -> map (\(z:_) -> z) ys ++ interleave (map (\(_:zs) -> zs) ys)
 
--- | Start the next round (transition from Shop to Combat)
 startNextRound :: SimulationState -> SimulationState
-startNextRound state = state
-  { gamePhase = CombatPhase
-  , enemiesToSpawnThisRound = enemiesForRound (currentRound state)
-  , enemiesSpawnedThisRound = 0
-  , spawnTimer = 0
-  , simTime = 0
-  }
+startNextRound state =
+  let queue = waveForRound (currentRound state)
+  in state
+       { gamePhase = CombatPhase
+       , enemiesToSpawnThisRound = length queue
+       , enemiesSpawnedThisRound = 0
+       , spawnQueue = queue
+       , spawnTimer = 0
+       , simTime = 0
+       , selectedGun = Nothing
+       }
 
--- | A simple scoring + assignment: choose the nearest ready gun; if none ready, choose nearest overall
+-- | Assignment helper for CLI/demo output.
 assignEnemies :: [Gun] -> [Enemy] -> [(Int, Maybe Int)]
-assignEnemies gs es = map (\e -> (enemyId e, fmap gunId (bestGun gs e))) es
+assignEnemies gs es = map (\e -> (enemyId e, fmap gunId (bestGun TargetNearest gs e))) es
 
--- Choose the best gun for an enemy:
--- prefer guns that are ready (currentCd <= 0), then shortest distance
-bestGun :: [Gun] -> Enemy -> Maybe Gun
-bestGun gs e =
+bestGun :: TargetingMode -> [Gun] -> Enemy -> Maybe Gun
+bestGun mode gs e =
   let ready = filter (\ng -> currentCd ng <= 0 && distanceToEnemy ng e <= range ng) gs
       inRange = filter (\ng -> distanceToEnemy ng e <= range ng) gs
+      pick xs = minimumBy (comparing (pairCost mode)) xs
+      pairCost TargetNearest g = distanceToEnemy g e
+      pairCost TargetFirst g = distanceToEnemy g e - damagePerShot g * 0.05
+      pairCost TargetWeakest g = health e + distanceToEnemy g e * 0.1 - damagePerShot g * 0.2
+      pairCost TargetStrongest g = negate (health e) + distanceToEnemy g e * 0.1
   in case ready of
-       [] -> if null inRange then Nothing else Just (minimumBy (comparing (`distanceToEnemy` e)) inRange)
-       _  -> Just (minimumBy (comparing (`distanceToEnemy` e)) ready)
+       [] -> if null inRange then Nothing else Just (pick inRange)
+       _ -> Just (pick ready)
 
--- | Spawn a new enemy
-spawnEnemy :: SimulationState -> Enemy
-spawnEnemy state =
-  let round = currentRound state
-      hp = enemyHealthForRound round
-      -- Vary spawn positions and velocities
-      spawnVariations =
-        [ ((-400, -100), (25, 5))
-        , ((-400, 0), (30, 0))
-        , ((-400, 100), (25, -5))
-        , ((400, -100), (-25, 5))
-        , ((400, 100), (-25, -5))
-        ]
-      idx = enemiesSpawnedThisRound state `mod` length spawnVariations
-      (spawnPos, vel) = spawnVariations !! idx
-  in Enemy
-      { enemyId = nextEnemyId state
-      , pos = spawnPos
-      , health = hp
-      , speed = sqrt (fst vel ^ (2::Int) + snd vel ^ (2::Int))
-      , vel = vel
-      }
+spawnEnemyOfType :: SimulationState -> EnemyType -> Enemy
+spawnEnemyOfType state et =
+  let eid = nextEnemyId state + enemiesSpawnedThisRound state
+      path = mapPath state
+      startPos = case path of
+        [] -> (-430, -210)
+        (p:_) -> p
+      nextWp = if length path > 1 then 1 else 0
+      roundScale = 1 + fromIntegral (currentRound state - 1) * 0.12
+      mkEnemy hp spd rew arm =
+        Enemy
+          { enemyId = eid
+          , pos = startPos
+          , health = hp * roundScale
+          , maxHealth = hp * roundScale
+          , speed = spd * (1 + fromIntegral (currentRound state - 1) * 0.02)
+          , reward = rew
+          , armor = arm
+          , enemyType = et
+          , targetWaypoint = nextWp
+          }
+  in case et of
+       Swarm -> mkEnemy 8 75 6 0.0
+       Runner -> mkEnemy 14 105 10 0.05
+       Brute -> mkEnemy 45 55 18 0.22
 
--- | Advance the simulation by dt: move enemies, cooldown guns, then let guns fire at assigned targets.
 stepSimulation :: Double -> SimulationState -> SimulationState
 stepSimulation dt s
   | simPaused s = s
-  | gamePhase s == ShopPhase = s  -- No simulation in shop phase
-  | gamePhase s == GameOver = s   -- No simulation when game over
-  | gamePhase s == CombatPhase = combatStep dt s
+  | gamePhase s == ShopPhase = s
+  | gamePhase s == GameOver = s
+  | gamePhase s == CombatPhase = combatStep (dt * simulationSpeed s) s
   | otherwise = s
 
 combatStep :: Double -> SimulationState -> SimulationState
 combatStep dt s =
-  let -- Spawn enemies over time
+  let -- Spawn enemies over time.
+      spawnInterval = 0.65
       newSpawnTimer = spawnTimer s + dt
-      shouldSpawn = newSpawnTimer >= 1.0 && enemiesSpawnedThisRound s < enemiesToSpawnThisRound s
-
-      (spawnedEnemies, spawnCount, resetTimer) =
-        if shouldSpawn
-          then ([spawnEnemy s], 1, 0)
-          else ([], 0, newSpawnTimer)
+      shouldSpawn = newSpawnTimer >= spawnInterval && not (null (spawnQueue s))
+      (spawnedEnemies, spawnedTypes, timerAfterSpawn) =
+        case (shouldSpawn, spawnQueue s) of
+          (True, et:rest) -> ([spawnEnemyOfType s et], rest, newSpawnTimer - spawnInterval)
+          _ -> ([], spawnQueue s, newSpawnTimer)
 
       allEnemies = simEnemies s ++ spawnedEnemies
 
-      -- Move enemies
-      movedEnemies = map (moveEnemy dt) allEnemies
+      -- Move enemies along path and remove those that reached goal.
+      movedEnemies = map (moveEnemyAlongPath dt (mapPath s)) allEnemies
+      (escapedEnemies, activeEnemies) = partition (enemyReachedGoal (mapPath s)) movedEnemies
+      livesLost = length escapedEnemies
 
-      -- Check if enemies escaped (went off screen) - lose lives
-      (escaped, remainingEnemies) = span (\e -> let (x, y) = pos e in abs x > 500 || abs y > 300) movedEnemies
-      livesLost = length escaped
-
-      -- Tick cooldowns
+      -- Tick cooldowns.
       gsTicked = map (tickCooldown dt) (simGuns s)
 
-      -- Fire phase - create bullets instead of instant damage (use selected algorithm)
-      (gs', newBullets, newFlashes) = firePhaseBullets (targetingAlgorithm s) gsTicked remainingEnemies (nextBulletId s)
+      -- Fire phase.
+      (gs', newBullets, newFlashes) =
+        firePhaseBullets (targetingAlgorithm s) (targetingMode s) (mapPath s) gsTicked activeEnemies (nextBulletId s)
 
-      -- Move existing bullets
+      -- Move and collide bullets.
       movedBullets = map (moveBullet dt) (simBullets s ++ newBullets)
+      (bulletsAfterHits, enemiesAfterHits, deadEnemies) = processBulletCollisions movedBullets activeEnemies
 
-      -- Check bullet collisions with enemies
-      (bulletsAfterHits, enemiesAfterHits, killedCount) = processBulletCollisions movedBullets remainingEnemies
+      -- Brutes split into swarms when killed.
+      spawnedOnDeath = concatMap splitOnDeath deadEnemies
+      allPostHitEnemies = enemiesAfterHits ++ spawnedOnDeath
 
-      -- Update muzzle flashes (decay over time)
+      -- Muzzle flashes.
       updatedFlashes = map (\(gid, t) -> (gid, t - dt)) (gunMuzzleFlashes s ++ newFlashes)
       activeFlashes = filter (\(_, t) -> t > 0) updatedFlashes
 
-      -- Award points for killed enemies
-      pointsEarned = killedCount * 10
-
+      pointsEarned = sum (map reward deadEnemies)
       newLives = lives s - livesLost
-      newPhase = if newLives <= 0
-                   then GameOver
-                   else if null enemiesAfterHits && enemiesSpawnedThisRound s + spawnCount >= enemiesToSpawnThisRound s
-                          then ShopPhase  -- Round complete
-                          else CombatPhase
+      roundDone = null allPostHitEnemies && null spawnedTypes
+      newPhase =
+        if newLives <= 0
+          then GameOver
+          else if roundDone
+            then ShopPhase
+            else CombatPhase
+      newRound =
+        if newPhase == ShopPhase && gamePhase s == CombatPhase
+          then currentRound s + 1
+          else currentRound s
 
-      newRound = if newPhase == ShopPhase && gamePhase s == CombatPhase
-                   then currentRound s + 1
-                   else currentRound s
-
-  in s { simGuns = gs'
-       , simEnemies = enemiesAfterHits
+  in s
+       { simGuns = gs'
+       , simEnemies = allPostHitEnemies
        , simBullets = bulletsAfterHits
        , simTime = simTime s + dt
-       , spawnTimer = resetTimer
-       , enemiesSpawnedThisRound = enemiesSpawnedThisRound s + spawnCount
-       , nextEnemyId = nextEnemyId s + spawnCount
+       , spawnTimer = timerAfterSpawn
+       , spawnQueue = spawnedTypes
+       , enemiesSpawnedThisRound = enemiesSpawnedThisRound s + length spawnedEnemies
+       , nextEnemyId = nextEnemyId s + length spawnedEnemies + length spawnedOnDeath
        , nextBulletId = nextBulletId s + length newBullets
        , points = points s + pointsEarned
        , lives = newLives
        , gamePhase = newPhase
        , currentRound = newRound
        , gunMuzzleFlashes = activeFlashes
+       , totalKills = totalKills s + length deadEnemies
+       , totalLeaks = totalLeaks s + livesLost
        }
+  where
+    splitOnDeath e
+      | enemyType e /= Brute = []
+      | otherwise =
+          let mkChild offset nid =
+                Enemy
+                  { enemyId = nid
+                  , pos = (fst (pos e) + offset, snd (pos e) - offset)
+                  , health = max 6 (maxHealth e * 0.18)
+                  , maxHealth = max 6 (maxHealth e * 0.18)
+                  , speed = speed e * 1.4
+                  , reward = 5
+                  , armor = 0
+                  , enemyType = Swarm
+                  , targetWaypoint = targetWaypoint e
+                  }
+              n1 = nextEnemyId s
+              n2 = nextEnemyId s + 1
+          in [mkChild (-8) n1, mkChild 8 n2]
 
--- Fire phase with bullets: guns create bullets when they shoot
-firePhaseBullets :: TargetingAlgorithm -> [Gun] -> [Enemy] -> Int -> ([Gun], [Bullet], [(Int, Double)])
-firePhaseBullets algo guns enemies startBulletId = case algo of
-  GreedyNearest -> greedyTargeting guns enemies startBulletId
-  HungarianOptimal -> hungarianTargeting guns enemies startBulletId
+firePhaseBullets :: TargetingAlgorithm -> TargetingMode -> [(Double, Double)] -> [Gun] -> [Enemy] -> Int -> ([Gun], [Bullet], [(Int, Double)])
+firePhaseBullets algo mode path guns enemies startBulletId =
+  case algo of
+    GreedyNearest -> greedyTargeting mode path guns enemies startBulletId
+    HungarianOptimal -> optimalTargeting mode path guns enemies startBulletId
 
--- Greedy algorithm: each gun shoots nearest enemy (original behavior)
-greedyTargeting :: [Gun] -> [Enemy] -> Int -> ([Gun], [Bullet], [(Int, Double)])
-greedyTargeting guns enemies startBulletId =
+greedyTargeting :: TargetingMode -> [(Double, Double)] -> [Gun] -> [Enemy] -> Int -> ([Gun], [Bullet], [(Int, Double)])
+greedyTargeting mode path guns enemies startBulletId =
   let (gs, bs, fs, _) = go guns [] [] startBulletId
   in (gs, bs, fs)
   where
-    go :: [Gun] -> [Bullet] -> [(Int, Double)] -> Int -> ([Gun], [Bullet], [(Int, Double)], Int)
     go [] accBullets accFlashes bid = ([], accBullets, accFlashes, bid)
     go (g:gs) accBullets accFlashes bulletId =
       let candidates = filter (\e -> distanceToEnemy g e <= range g) enemies
@@ -283,125 +421,157 @@ greedyTargeting guns enemies startBulletId =
             if currentCd g > 0 || null candidates
               then (g, [], [], bulletId)
               else
-                let target = minimumBy (comparing (distanceToEnemy g)) candidates
-                    g' = g { currentCd = cooldownTime g }
+                let target = minimumBy (comparing (pairCost mode path g)) candidates
+                    fired = g { currentCd = cooldownTime g }
                     bullet = createBullet bulletId (gunId g) (gpos g) (pos target) (damagePerShot g)
-                    flash = (gunId g, 0.1)  -- Muzzle flash duration
-                in (g', [bullet], [flash], bulletId + 1)
-          (restGuns, restBullets, restFlashes, finalId) = go gs (accBullets ++ newBullets) (accFlashes ++ newFlashes) nextId
+                    flash = (gunId g, 0.1)
+                in (fired, [bullet], [flash], bulletId + 1)
+          (restGuns, restBullets, restFlashes, finalId) =
+            go gs (accBullets ++ newBullets) (accFlashes ++ newFlashes) nextId
       in (g' : restGuns, restBullets, restFlashes, finalId)
 
--- Hungarian/Optimal algorithm: finds optimal gun-enemy assignment
-hungarianTargeting :: [Gun] -> [Enemy] -> Int -> ([Gun], [Bullet], [(Int, Double)])
-hungarianTargeting guns enemies startBulletId =
-  let -- Get ready guns (cooldown <= 0)
-      readyGuns = filter (\g -> currentCd g <= 0) guns
-      notReadyGuns = filter (\g -> currentCd g > 0) guns
-
-      -- Find optimal assignment for ready guns
-      assignments = optimalAssignment readyGuns enemies
-
-      -- Create bullets and update guns based on assignments
+optimalTargeting :: TargetingMode -> [(Double, Double)] -> [Gun] -> [Enemy] -> Int -> ([Gun], [Bullet], [(Int, Double)])
+optimalTargeting mode path guns enemies startBulletId =
+  let readyGuns = filter (\g -> currentCd g <= 0) guns
+      restingGuns = filter (\g -> currentCd g > 0) guns
+      cappedEnemies = take 12 $ sortByThreat path enemies
+      cappedGuns = take 10 readyGuns
+      assignments = if length cappedGuns * length cappedEnemies <= 80
+        then exactAssignment mode path cappedGuns cappedEnemies
+        else uniqueGreedyAssignments mode path cappedGuns cappedEnemies
       (firedGuns, bullets, flashes, nextId) = processAssignments assignments startBulletId
+      firedIds = map (gunId . fst) assignments
+      untouchedReady = filter (\g -> gunId g `notElem` firedIds) readyGuns
+      allGuns = firedGuns ++ untouchedReady ++ restingGuns
+  in nextId `seq` (allGuns, bullets, flashes)
 
-      -- Combine fired guns with not-ready guns
-      allGuns = firedGuns ++ notReadyGuns
+processAssignments :: [(Gun, Enemy)] -> Int -> ([Gun], [Bullet], [(Int, Double)], Int)
+processAssignments [] bid = ([], [], [], bid)
+processAssignments ((g, e):rest) bulletId =
+  let g' = g { currentCd = cooldownTime g }
+      bullet = createBullet bulletId (gunId g) (gpos g) (pos e) (damagePerShot g)
+      flash = (gunId g, 0.1)
+      (restGuns, restBullets, restFlashes, finalId) = processAssignments rest (bulletId + 1)
+  in (g' : restGuns, bullet : restBullets, flash : restFlashes, finalId)
 
-  in (allGuns, bullets, flashes)
+exactAssignment :: TargetingMode -> [(Double, Double)] -> [Gun] -> [Enemy] -> [(Gun, Enemy)]
+exactAssignment mode path guns enemies = snd (go guns enemies)
   where
-    -- Find optimal assignment using a greedy approach with global consideration
-    optimalAssignment :: [Gun] -> [Enemy] -> [(Gun, Enemy)]
-    optimalAssignment [] _ = []
-    optimalAssignment _ [] = []
-    optimalAssignment gs es =
-      let -- Calculate all valid gun-enemy pairs with costs (distance / damage ratio)
-          validPairs = [(g, e, cost g e) | g <- gs, e <- es, distanceToEnemy g e <= range g]
-          cost g e = distanceToEnemy g e / damagePerShot g  -- Prefer high damage guns on close enemies
-      in if null validPairs
-           then []
+    go [] es = (0, [])
+    go (g:gs) es =
+      let skip = go gs es
+          options =
+            [ let (costTail, asgTail) = go gs (filter (\x -> enemyId x /= enemyId e) es)
+              in (pairCost mode path g e + costTail, (g, e) : asgTail)
+            | e <- es
+            , distanceToEnemy g e <= range g
+            ]
+          allChoices = skip : options
+      in minimumBy (comparing fst) allChoices
+
+uniqueGreedyAssignments :: TargetingMode -> [(Double, Double)] -> [Gun] -> [Enemy] -> [(Gun, Enemy)]
+uniqueGreedyAssignments mode path guns enemies = go guns enemies []
+  where
+    go [] _ acc = acc
+    go _ [] acc = acc
+    go (g:gs) es acc =
+      let candidates = filter (\e -> distanceToEnemy g e <= range g) es
+      in if null candidates
+           then go gs es acc
            else
-             let -- Find best assignment (minimum cost)
-                 (bestGun, bestEnemy, _) = minimumBy (comparing (\(_,_,c) -> c)) validPairs
-                 -- Recursively assign remaining guns to remaining enemies
-                 remaining = optimalAssignment
-                   (filter (\g -> gunId g /= gunId bestGun) gs)
-                   (filter (\e -> enemyId e /= enemyId bestEnemy) es)
-             in (bestGun, bestEnemy) : remaining
+             let e = minimumBy (comparing (pairCost mode path g)) candidates
+                 remaining = filter (\x -> enemyId x /= enemyId e) es
+             in go gs remaining ((g, e) : acc)
 
-    processAssignments :: [(Gun, Enemy)] -> Int -> ([Gun], [Bullet], [(Int, Double)], Int)
-    processAssignments [] bid = ([], [], [], bid)
-    processAssignments ((g, e):rest) bulletId =
-      let g' = g { currentCd = cooldownTime g }
-          bullet = createBullet bulletId (gunId g) (gpos g) (pos e) (damagePerShot g)
-          flash = (gunId g, 0.1)
-          (restGuns, restBullets, restFlashes, finalId) = processAssignments rest (bulletId + 1)
-      in (g' : restGuns, bullet : restBullets, flash : restFlashes, finalId)
+pairCost :: TargetingMode -> [(Double, Double)] -> Gun -> Enemy -> Double
+pairCost mode path g e =
+  case mode of
+    TargetNearest -> distanceToEnemy g e
+    TargetFirst -> remainingPathDistance path e * 0.8 + distanceToEnemy g e * 0.4 - speed e * 0.25
+    TargetWeakest -> health e + distanceToEnemy g e * 0.2
+    TargetStrongest -> (1000 - health e * 6) + distanceToEnemy g e * 0.2
 
--- Process bullet collisions with enemies
-processBulletCollisions :: [Bullet] -> [Enemy] -> ([Bullet], [Enemy], Int)
+sortByThreat :: [(Double, Double)] -> [Enemy] -> [Enemy]
+sortByThreat path =
+  sortWith (\e -> remainingPathDistance path e - speed e * 0.25 - health e * 0.02)
+
+sortWith :: Ord b => (a -> b) -> [a] -> [a]
+sortWith f = map snd . sortPairs . map (\x -> (f x, x))
+  where
+    sortPairs = foldr insert []
+    insert x [] = [x]
+    insert x (y:ys)
+      | fst x <= fst y = x : y : ys
+      | otherwise = y : insert x ys
+
+remainingPathDistance :: [(Double, Double)] -> Enemy -> Double
+remainingPathDistance path e
+  | null path = 0
+  | targetWaypoint e >= length path = 0
+  | otherwise =
+      let fromPos = pos e
+          nextPoint = path !! targetWaypoint e
+          initial = distance fromPos nextPoint
+          rest = zip (drop (targetWaypoint e) path) (drop (targetWaypoint e + 1) path)
+      in initial + sum [distance a b | (a, b) <- rest]
+
+processBulletCollisions :: [Bullet] -> [Enemy] -> ([Bullet], [Enemy], [Enemy])
 processBulletCollisions bullets enemies =
-  let -- Check each bullet for collision
-      (activeBullets, hitEnemyIds, damages) = foldl checkBullet ([], [], []) bullets
-
-      -- Apply damage to enemies
-      (updatedEnemies, killed) = foldl applyDamage ([], 0) enemies
-
-  in (activeBullets, updatedEnemies, killed)
+  let (activeBullets, damageEvents) = foldr checkBullet ([], []) bullets
+      enemyDamages = aggregateDamage damageEvents []
+      (updatedEnemies, deadEnemies) = applyDamages enemyDamages enemies [] []
+  in (activeBullets, updatedEnemies, deadEnemies)
   where
-    checkBullet (acc, hits, dmgs) bullet =
+    checkBullet bullet (accBullets, accEvents) =
       let (bx, by) = bulletPos bullet
-          -- Check if bullet is off screen
-          outOfBounds = abs bx > 600 || abs by > 400
-          -- Check if bullet hit any enemy
-          hitEnemy = filter (\e ->
-            let (ex, ey) = pos e
-                dist = sqrt ((bx - ex)^(2::Int) + (by - ey)^(2::Int))
-            in dist < 10) enemies  -- Hit radius
+          outOfBounds = abs bx > 620 || abs by > 420
+          hitEnemy = firstHit bullet enemies
       in case hitEnemy of
-           (e:_) -> (acc, enemyId e : hits, (enemyId e, bulletDamage bullet) : dmgs)  -- Bullet hit
-           [] -> if outOfBounds
-                   then (acc, hits, dmgs)  -- Bullet missed, remove it
-                   else (bullet : acc, hits, dmgs)  -- Bullet still flying
+           Just e -> (accBullets, (enemyId e, bulletDamage bullet) : accEvents)
+           Nothing ->
+             if outOfBounds
+               then (accBullets, accEvents)
+               else (bullet : accBullets, accEvents)
 
-    applyDamage (acc, killCount) enemy =
-      let damage = sum [d | (eid, d) <- damages, eid == enemyId enemy]
-          newHealth = health enemy - damage
-          enemy' = enemy { health = newHealth }
+    firstHit b = pick b . filter (collides b)
+    pick _ [] = Nothing
+    pick b xs = Just (minimumBy (comparing (distance (bulletPos b) . pos)) xs)
+
+    collides b e =
+      let d = distance (bulletPos b) (pos e)
+      in d < 10
+
+    aggregateDamage [] acc = acc
+    aggregateDamage ((eid, dmg):rest) acc =
+      let updated = addDamage eid dmg acc
+      in aggregateDamage rest updated
+
+    addDamage eid dmg [] = [(eid, dmg)]
+    addDamage eid dmg ((k, v):xs)
+      | eid == k = (k, v + dmg) : xs
+      | otherwise = (k, v) : addDamage eid dmg xs
+
+    applyDamages _ [] alive dead = (reverse alive, reverse dead)
+    applyDamages dmgs (e:es) alive dead =
+      let incoming = sum [d | (eid, d) <- dmgs, eid == enemyId e]
+          effective = incoming * (1 - armor e)
+          newHealth = health e - effective
+          e' = e { health = newHealth }
       in if newHealth <= 0
-           then (acc, killCount + 1)  -- Enemy killed, don't add to list
-           else (enemy' : acc, killCount)  -- Enemy damaged
+           then applyDamages dmgs es alive (e : dead)
+           else applyDamages dmgs es (e' : alive) dead
 
-    damages = collectDamages bullets enemies []
+pointToSegmentDistance :: (Double, Double) -> (Double, Double) -> (Double, Double) -> Double
+pointToSegmentDistance (px, py) (x1, y1) (x2, y2)
+  | x1 == x2 && y1 == y2 = distance (px, py) (x1, y1)
+  | otherwise =
+      let dx = x2 - x1
+          dy = y2 - y1
+          t = ((px - x1) * dx + (py - y1) * dy) / (dx * dx + dy * dy)
+          t' = max 0 (min 1 t)
+          proj = (x1 + t' * dx, y1 + t' * dy)
+      in distance (px, py) proj
 
-    collectDamages [] _ acc = acc
-    collectDamages (b:bs) es acc =
-      let (bx, by) = bulletPos b
-          hitEnemy = filter (\e ->
-            let (ex, ey) = pos e
-                dist = sqrt ((bx - ex)^(2::Int) + (by - ey)^(2::Int))
-            in dist < 10) es
-      in case hitEnemy of
-           (e:_) -> collectDamages bs es ((enemyId e, bulletDamage b) : acc)
-           [] -> collectDamages bs es acc
-
--- Old fire phase (kept for compatibility, not used anymore)
-firePhase :: [Gun] -> [Enemy] -> ([Gun], [Enemy])
-firePhase guns enemies = foldl shootOne ([], enemies) guns
-  where
-    shootOne :: ([Gun], [Enemy]) -> Gun -> ([Gun], [Enemy])
-    shootOne (accGuns, es) g =
-      let candidates = filter (\req -> distanceToEnemy g req <= range g) es
-      in if currentCd g > 0 || null candidates
-           then (accGuns ++ [g], es)
-           else
-             let target = minimumBy (comparing (distanceToEnemy g)) candidates
-                 (g', tgt') = fireAt g target
-                 -- replace target in enemy list with damaged version; remove if dead
-                 es' = map (\r -> if enemyId r == enemyId tgt' then tgt' else r) es
-                 es'' = filter (\r -> health r > 0) es'
-             in (accGuns ++ [g'], es'')
-
--- | Single-shot helper to run one tick and print assignment (used by the CLI demo)
 simulateOnce :: [Gun] -> [Enemy] -> IO ()
 simulateOnce gs es = do
   let asg = assignEnemies gs es
