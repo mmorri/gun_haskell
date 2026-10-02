@@ -41,9 +41,15 @@ packages:
 #   commit: e7b331f14bcffb8367cd58fbfc8b40ec7642100a
 #
 # extra-deps: []
+extra-deps:
+- gloss-juicy-0.2.3@sha256:0c3bca95237cbf91f8b3b1936a0661f1e0457acd80502276d54d6c5210f88b25,1618
 
 # Override default flag values for project packages and extra-deps
 # flags: {}
+
+# Workaround for binutils >= 2.44 (no ld.gold): use the bfd linker for everything.
+ghc-options:
+  "$everything": -optl-fuse-ld=bfd
 
 # Extra package databases containing global packages
 # extra-package-dbs: []

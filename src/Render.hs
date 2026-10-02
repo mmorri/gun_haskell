@@ -1,6 +1,7 @@
 module Render (drawState, handleEventGloss) where
 
-import Data.List (isInfixOf)
+import Data.List (isInfixOf, minimumBy)
+import Data.Ord (comparing)
 import Graphics.Gloss
 import Graphics.Gloss.Interface.Pure.Game
   ( Event(..)
@@ -28,12 +29,13 @@ import Game
   , upgradeGunAtPosition
   )
 import Enemy (Enemy(..), EnemyType(..))
-import Gun (Gun(..))
+import Gun (Gun(..), distanceToEnemy)
 import Bullet (Bullet(..))
+import Assets (Assets(..))
 
--- | Convert simulation state to a Picture.
-drawState :: SimulationState -> Picture
-drawState s = case gamePhase s of
+-- | Convert simulation state to a Picture, using loaded Kenney sprites.
+drawState :: Assets -> SimulationState -> Picture
+drawState assets s = case gamePhase s of
   ShopPhase -> Pictures [starrySky t, battlefield, gridLines, pathPic, portalAndBase, towerRanges, gunsPic, placementPreview, sparkles, shopUI, hud]
   CombatPhase -> Pictures [starrySky t, battlefield, gridLines, pathPic, portalAndBase, towerRanges, gunsPic, muzzleFlashes, bulletsPic, enemiesPic, hud, combatBanner]
   GameOver -> Pictures [starrySky t, battlefield, gridLines, pathPic, towerRanges, gunsPic, bulletsPic, enemiesPic, gameOverScreen]
@@ -89,21 +91,18 @@ drawState s = case gamePhase s of
       path ->
         let (sx, sy) = head path
             (ex, ey) = last path
-            pulse = 18 + 3 * sin (t*4)
+            portalScale = 0.5 + 0.04 * sin (t*4)
         in Pictures
           [ Translate (realToFrac sx) (realToFrac sy) $ Pictures
-              [ color (makeColor 0.2 1 0.8 0.25) $ circleSolid (pulse+8)
-              , color (makeColor 0.4 0.2 1 0.7) $ ThickCircle pulse 4
-              , color (makeColor 0.2 1 0.9 0.9) $ ThickCircle (pulse-6) 2
-              , Translate (-28) (-26) $ scale 0.08 0.08 $ color (makeColor 0.5 1 0.9 1) $ Text "gremlin hole"
+              [ color (makeColor 0.2 1 0.8 0.18) $ circleSolid 34
+              , Rotate (t*40) $ scale portalScale portalScale (aPortal assets)
+              , Translate (-28) (-30) $ scale 0.08 0.08 $ color (makeColor 0.5 1 0.9 1) $ Text "gremlin hole"
               ]
           , Translate (realToFrac ex) (realToFrac ey) $ Pictures
-              [ color (makeColor 1 0.3 0.5 0.2) $ circleSolid 26
-              , color (makeColor 0.9 0.9 0.95 1) $ rectangleSolid 22 18
-              , color (makeColor 1 0.35 0.55 1) $ Polygon [(-11,-9),(11,-9),(0,12)]
-              , Translate (-4) (-2) $ color (makeColor 0.2 0.2 0.3 1) $ rectangleSolid 8 8
-              , Translate 14 14 $ drawHeart (10 + 2*sin (t*5))
-              , Translate (-30) 22 $ scale 0.08 0.08 $ color (makeColor 1 0.8 0.9 1) $ Text "ur base (pls protect)"
+              [ color (makeColor 0.5 0.8 1 0.15) $ circleSolid 30
+              , scale 0.55 0.55 (aCrystal assets)
+              , Translate 16 16 $ drawHeart (10 + 2*sin (t*5))
+              , Translate (-34) 26 $ scale 0.08 0.08 $ color (makeColor 1 0.8 0.9 1) $ Text "ur crystal (pls protect)"
               ]
           ]
 
@@ -124,15 +123,20 @@ drawState s = case gamePhase s of
             snapY = fromIntegral (round (my / 40) :: Int) * 40
             p = (realToFrac snapX, realToFrac snapY)
             canPlace = canAffordGun template s && canPlaceGunAt p s
-            previewColor = if canPlace then makeColor 0.4 1 0.5 0.5 else makeColor 1 0.35 0.35 0.5
             rangeColor = if canPlace then makeColor 0.3 0.9 1 0.12 else makeColor 1 0.3 0.3 0.08
         in Translate snapX snapY $ Pictures
              [ color rangeColor $ circleSolid (realToFrac (templateRange template))
              , color (makeColor 0.4 1 1 0.5) $ circle (realToFrac (templateRange template))
-             , color previewColor $ circleSolid 11
+             , ghostPic template
              , color white $ ThickCircle 11 2
              , Translate (-22) 16 $ scale 0.08 0.08 $ color white $ Text (if canPlace then "click = adopt!" else "nope, bad spot!")
              ]
+
+    ghostPic template
+      | "Nanny" `isInfixOf` templateName template = color (makeColor 1 1 1 0.7) $ scale 0.32 0.32 (aNannyBase assets)
+      | "BRRRT" `isInfixOf` templateName template = color (makeColor 1 1 1 0.7) $ scale 0.32 0.32 (aBrrrt assets)
+      | "YEET" `isInfixOf` templateName template = color (makeColor 1 1 1 0.7) $ scale 0.32 0.32 (aYeet assets)
+      | otherwise = color (makeColor 1 1 1 0.7) $ scale 0.32 0.32 (aPewBase assets)
 
     isSniper g = "Nanny" `isInfixOf` gunName g
     isRapid g = "BRRRT" `isInfixOf` gunName g
@@ -142,27 +146,26 @@ drawState s = case gamePhase s of
       let (xD, yD) = gpos g
           x = realToFrac xD
           y = realToFrac yD
-          bobY = 1.5 * sin (t*2 + fromIntegral (gunId g))
-          lvlStars = [Translate (-10 + fromIntegral i * 10) (-18) $ scale 0.6 0.6 $ drawStar 5 | i <- [0 .. gunLevel g - 1]]
-          baseCol
-            | isSniper g = makeColor 0.55 0.4 1 1
-            | isRapid g = makeColor 1 0.55 0.2 1
-            | isHeavy g = makeColor 1 0.75 0.25 1
-            | otherwise = makeColor 0.25 0.85 1 1
-          barrel
-            | isSniper g = Pictures [color (makeColor 0.9 0.9 1 1) $ rectangleSolid 22 4, Translate 14 0 $ color (makeColor 1 0.4 0.8 1) $ circleSolid 4]
-            | isRapid g = Pictures [color (makeColor 0.2 0.2 0.25 1) $ rectangleSolid 14 10, color yellow $ Pictures [Translate 10 (-3) $ circleSolid 2, Translate 10 0 $ circleSolid 2, Translate 10 3 $ circleSolid 2]]
-            | isHeavy g = Pictures [color (makeColor 0.25 0.2 0.15 1) $ rectangleSolid 18 10, Translate 12 0 $ color (makeColor 1 0.3 0.2 1) $ circleSolid 6]
-            | otherwise = Pictures [color (makeColor 0.2 0.25 0.4 1) $ rectangleSolid 16 6, Translate 10 0 $ color white $ circleSolid 3]
-      in Translate x (y+bobY) $ Pictures
-           [ color (makeColor 0 0 0 0.4) $ Translate 2 (-3) $ circleSolid 13 -- shadow
-           , color (makeColor 0.15 0.18 0.28 1) $ circleSolid 12 -- socket
-           , color baseCol $ circleSolid 9
-           , barrel
-           , Translate (-4) 3 $ color white $ circleSolid 3 -- googly eye white
-           , Translate (-4) 3 $ color (makeColor 0.1 0.1 0.2 1) $ circleSolid 1.4 -- pupil
-           , Translate 4 3 $ color white $ circleSolid 3
-           , Translate 4 3 $ color (makeColor 0.1 0.1 0.2 1) $ circleSolid 1.4
+          lvlStars = [Translate (-10 + fromIntegral i * 10) (-20) $ scale 0.6 0.6 $ drawStar 5 | i <- [0 .. gunLevel g - 1]]
+          -- Aim the barrel at the nearest gremlin (sprites face up).
+          aim = case es of
+            [] -> 0
+            _ -> let e = minimumBy (comparing (distanceToEnemy g)) es
+                 in aimAngle (gpos g) (pos e)
+          body
+            | isSniper g = Pictures
+                [ scale 0.32 0.32 (aNannyBase assets)
+                , Rotate aim $ Translate 0 10 $ scale 0.32 0.32 (aNannyBarrel assets)
+                ]
+            | isRapid g = Rotate aim $ scale 0.32 0.32 (aBrrrt assets)
+            | isHeavy g = Rotate aim $ scale 0.32 0.32 (aYeet assets)
+            | otherwise = Pictures
+                [ scale 0.32 0.32 (aPewBase assets)
+                , Rotate aim $ Translate 0 8 $ scale 0.32 0.32 (aPewBarrel assets)
+                ]
+      in Translate x y $ Pictures
+           [ color (makeColor 0 0 0 0.4) $ Translate 2 (-14) $ scale 1 0.45 $ circleSolid 16 -- shadow
+           , body
            , Pictures lvlStars
            ]
 
@@ -188,11 +191,8 @@ drawState s = case gamePhase s of
             (g:_) ->
               let (gx, gy) = gpos g
               in Translate (realToFrac gx) (realToFrac gy) $ Pictures
-                   [ color (makeColor 1 0.9 0.3 0.7) (circleSolid 14)
-                   , color (makeColor 1 0.6 0.1 0.6) (circleSolid 9)
-                   , color white (ThickCircle 6 2)
-                   , color (makeColor 1 1 0.6 0.9) $ Pictures [Rotate a $ rectangleSolid 20 2 | a <- [0,60,120]]
-                   , Translate 0 18 $ scale 0.07 0.07 $ color yellow $ Text "PEW!"
+                   [ Rotate (fromIntegral (gid * 47)) $ Translate 0 16 $ scale 0.5 0.5 (aFlame assets)
+                   , Translate 0 20 $ scale 0.07 0.07 $ color yellow $ Text "PEW!"
                    ]
             [] -> Blank
 
@@ -202,13 +202,10 @@ drawState s = case gamePhase s of
           len = sqrt (vx*vx+vy*vy) + 1
           tx = xD - vx/len*18
           ty = yD - vy/len*18
+          sprite = if bulletDamage bullet >= 12 then aBulletHeavy assets else aBullet assets
       in Pictures
            [ color (makeColor 1 0.6 0.1 0.5) $ Line [(realToFrac tx, realToFrac ty),(realToFrac xD, realToFrac yD)]
-           , Translate (realToFrac xD) (realToFrac yD) $ Pictures
-               [ color (makeColor 1 0.5 0.1 0.4) (circleSolid 5)
-               , color (makeColor 1 0.95 0.5 1) (circleSolid 3)
-               , color white (circleSolid 1.5)
-               ]
+           , Translate (realToFrac xD) (realToFrac yD) $ scale 0.35 0.35 sprite
            ]
 
     bulletsPic = Pictures $ map bulletPic bs
@@ -222,45 +219,21 @@ drawState s = case gamePhase s of
           hpCol | hpRatio > 0.6 = makeColor 0.35 1 0.45 1
                 | hpRatio > 0.3 = makeColor 1 0.85 0.25 1
                 | otherwise = makeColor 1 0.3 0.35 1
-          (bodyColor, sizeBase) = case enemyType e of
-            Swarm -> (makeColor 0.45 1 0.35 1, 7)
-            Runner -> (makeColor 1 0.6 0.15 1, 9)
-            Brute -> (makeColor 0.75 0.35 1 1, 13)
-          face = case enemyType e of
-            Swarm -> Pictures -- derpy zoomie gremlin
-              [ Translate (-3) 2 $ color white $ circleSolid 3
-              , Translate 3 2 $ color white $ circleSolid 3
-              , Translate (-2.5) 2 $ color black $ circleSolid 1.3
-              , Translate 3.5 2 $ color black $ circleSolid 1.3
-              , Translate 0 (-2) $ color (makeColor 0.2 0.3 0.2 1) $ circleSolid 1.8
-              , Translate (-sizeBase-4) 0 $ scale 0.06 0.06 $ color white $ Text "zoom"
-              ]
-            Runner -> Pictures -- caffeinated goblin
-              [ Translate (-sizeBase-8) 0 $ color (makeColor 1 1 1 0.5) $ Line [(-6,-4),(0,-4),( -6,0),(0,0),(-6,4),(0,4)]
-              , Translate (-3) 1 $ color white $ circleSolid 2.8
-              , Translate 3 1 $ color white $ circleSolid 2.8
-              , Translate (-3) 0.5 $ color black $ circleSolid 1.2
-              , Translate 3 0.5 $ color black $ circleSolid 1.2
-              , Translate 6 (-3) $ color (makeColor 0.5 0.8 1 0.9) $ circleSolid 1.5 -- sweat drop
-              ]
-            Brute -> Pictures -- grumpy chungus
-              [ color (makeColor 0.3 0.1 0.4 1) $ ThickCircle (sizeBase+2) 3 -- spikes hint
-              , Translate 0 6 $ color (makeColor 0.15 0.05 0.2 1) $ rectangleSolid (sizeBase*1.4) 3 -- unibrow
-              , Translate (-4) 1 $ color white $ circleSolid 3
-              , Translate 4 1 $ color white $ circleSolid 3
-              , Translate (-4) 0 $ color red $ circleSolid 1.4
-              , Translate 4 0 $ color red $ circleSolid 1.4
-              , Translate 0 10 $ color (makeColor 1 0.85 0.2 1) $ Polygon [(-6,0),(6,0),(3,5),(-3,5)] -- tiny crown
-              , Translate 0 (-5) $ color (makeColor 0.3 0.05 0.1 1) $ rectangleSolid 8 2 -- frown
-              ]
+          (sprite, sprScale, sizeBase) = case enemyType e of
+            Swarm -> (aSwarm assets, 0.4, 7)
+            Runner -> (aRunner assets, 0.4, 9)
+            Brute -> (aBrute assets, 0.32, 13)
+          -- Face along the path toward the next waypoint (sprites face up).
+          facing = case drop (targetWaypoint e) (mapPath s) of
+            (nx, ny):_ -> aimAngle (pos e) (nx, ny)
+            [] -> 0
           label = case enemyType e of
             Swarm -> "zoomie"
             Runner -> "espresso goblin"
             Brute -> "chungus"
       in Translate x y $ Pictures
-           [ color (makeColor 0 0 0 0.35) (Translate 2 (-3) $ circleSolid (sizeBase + 2))
-           , color bodyColor (circleSolid sizeBase)
-           , face
+           [ color (makeColor 0 0 0 0.35) (Translate 2 (-3) $ scale 1 0.5 $ circleSolid (sizeBase + 2))
+           , Rotate facing $ scale sprScale sprScale sprite
            , Translate (-11) (sizeBase + 9) $ color (makeColor 0 0 0 0.7) $ rectangleSolid 22 5
            , Translate (-11 + realToFrac (hpRatio * 11)) (sizeBase + 9) $ color hpCol $ rectangleSolid (realToFrac (hpRatio * 22)) 3.5
            , Translate (-14) (-sizeBase-12) $ scale 0.06 0.06 $ color (makeColor 1 1 1 0.7) $ Text label
@@ -361,6 +334,16 @@ drawState s = case gamePhase s of
       , Translate (-200) (-64) $ scale 0.11 0.11 $ color (makeColor 0.7 0.9 1 1) $ Text $ "Cash vaporized: $" ++ show (totalSpent s)
       , Translate (-200) (-110) $ scale 0.09 0.09 $ color (greyN 0.8) $ Text "Press Q to cry quietly (then replay!)"
       ]
+
+-- | Rotation (Gloss degrees, counterclockwise) to aim a sprite that faces
+-- up (+y) from one point at another.
+aimAngle :: (Double, Double) -> (Double, Double) -> Float
+aimAngle (fx, fy) (tx, ty)
+  | dx == 0 && dy == 0 = 0
+  | otherwise = realToFrac (-(atan2 dx dy * 180 / pi))
+  where
+    dx = tx - fx
+    dy = ty - fy
 
 funnyTip :: Int -> String
 funnyTip r = case r `mod` 6 of

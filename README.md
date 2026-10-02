@@ -53,15 +53,22 @@ Protect ur base (pls) from the Zoomie Gremlins pouring out of the gremlin hole.
 
 ```bash
 stack build
-stack run
+stack run   # run from the project root so assets/kenney/ is found
 ```
 
 Note: On Linux, you may need OpenGL/GLUT dev libs for Gloss:
 `sudo apt install freeglut3-dev libgl1-mesa-dev libglu1-mesa-dev`
 
-Note: On Ubuntu 25.10+ (binutils 2.44+, no `ld.gold`), the build uses `-optl-fuse-ld=bfd`
-(already set in `sentry-gun.cabal`). If linking fails with `cannot find 'ld'`, build with:
-`stack build --ghc-options="-optl-fuse-ld=bfd"`
+Note: On Ubuntu 25.10+ (binutils 2.44+, no `ld.gold`), the repo already works around it:
+`-optl-fuse-ld=bfd` is set in `sentry-gun.cabal` + `stack.yaml` (`$everything`). If a fresh
+GHC install still fails with `cannot find 'ld'` or `could not execute: /usr/bin/ld.gold`,
+patch the GHC settings file (`.../lib/ghc-9.10.3/lib/settings`): replace `ld.gold` with
+`ld.bfd` (or symlink it), then rebuild.
+
+## Credits
+
+- Sprites: [Kenney Tower Defense (Top-Down)](https://kenney.nl/assets/tower-defense-top-down) — **CC0** (public domain). See `assets/kenney/License-CC0-Kenney.txt`. Thank you Kenney!
+- Built with Haskell + Gloss (+ gloss-juicy for PNG loading).
 
 ## License
 

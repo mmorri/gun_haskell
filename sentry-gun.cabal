@@ -13,7 +13,9 @@ copyright:           2025 Author name here
 category:            Web
 build-type:          Simple
 extra-source-files:  README.md
-                     CHANGELOG.md
+                      CHANGELOG.md
+                      assets/kenney/*.png
+                      assets/kenney/License-CC0-Kenney.txt
 
 executable sentry-gun
   hs-source-dirs:      src
@@ -22,8 +24,9 @@ executable sentry-gun
   build-depends:       base >= 4.7 && < 5,
                        containers,
                        ansi-terminal,
-                       gloss >= 1.13
-  other-modules:       Enemy, Gun, Game, ConsoleUI, Render, Bullet
+                       gloss >= 1.13,
+                       gloss-juicy
+  other-modules:       Enemy, Gun, Game, ConsoleUI, Render, Bullet, Assets
   ghc-options:         -Wall
                        -Wcompat
                        -Widentities

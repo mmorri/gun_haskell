@@ -2,6 +2,7 @@ module Main (main) where
 
 import Graphics.Gloss
 import Graphics.Gloss.Interface.Pure.Game
+import Assets (loadAssets)
 import Game (SimulationState, initSimulation, stepSimulation)
 import Render (drawState, handleEventGloss)
 
@@ -30,9 +31,17 @@ main = do
   putStrLn ""
   putStrLn "Starting game... pew pew!"
 
+  (missing, assets) <- loadAssets
+  case missing of
+    [] -> putStrLn "Sprites loaded: Kenney TD (CC0), thank you Kenney!"
+    _ -> do
+      putStrLn "WARNING: missing sprite files (entities will be invisible):"
+      mapM_ (putStrLn . ("  - " ++)) missing
+      putStrLn "Run from the project root so assets/kenney/ is found."
+
   let initialState = initSimulation [] []
 
-  play window background fps initialState drawState handleEventGloss updateWorld
+  play window background fps initialState (drawState assets) handleEventGloss updateWorld
 
 updateWorld :: Float -> SimulationState -> SimulationState
 updateWorld dt = stepSimulation (realToFrac dt)
