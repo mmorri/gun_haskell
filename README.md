@@ -4,6 +4,14 @@ A tower defense game written in Haskell using Gloss — now with 200% more spark
 
 Protect ur base (pls) from the Zoomie Gremlins pouring out of the gremlin hole.
 
+![Pew-Pew Defense Deluxe](docs/screenshots/combat.png)
+
+There are two ways to play:
+
+- **Web port** (`web/`): a self-contained HTML5 build in TypeScript + Canvas, playable in any
+  modern browser and packaged for itch.io. This is the version most people should play.
+- **Original desktop game** (`src/`): the Haskell + Gloss version that started it all.
+
 ## Highlights
 
 - Round-based gameplay with escalating mixed enemy waves
@@ -49,7 +57,30 @@ Protect ur base (pls) from the Zoomie Gremlins pouring out of the gremlin hole.
 - **F**: toggle espresso speed (1x/2x)
 - **Q**: cry quietly
 
-## Build
+## Web Build
+
+```bash
+cd web
+npm install
+npm run build   # writes a playable site to web/dist/
+npm run dev     # dev server with live reload at http://localhost:5173
+```
+
+To produce an itch.io upload:
+
+```bash
+cd web
+./package-itch.sh   # writes docs/pew-pew-defense-deluxe-web.zip
+```
+
+The zip contains `index.html` at its root, so it can be uploaded directly as an HTML5
+project on itch.io. Store-page copy lives in `docs/itch-description.md`; cover art and
+screenshots are in `docs/`.
+
+The web port keeps all its balance tables in `web/src/config.ts` and ships with a headless
+balance simulator (`cd web && node sim-run.mjs`).
+
+## Desktop Build
 
 ```bash
 stack build

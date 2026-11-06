@@ -1,0 +1,59 @@
+:root {
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #04050b;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+#stage {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background:
+    radial-gradient(1200px 700px at 50% 40%, #0d1230 0%, #04050b 70%);
+}
+
+#game {
+  display: block;
+  touch-action: none;
+  cursor: default;
+  border-radius: 10px;
+  box-shadow: 0 24px 90px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(120, 200, 255, 0.12);
+  outline: none;
+}
+
+#boot {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: #7fd8ff;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  font-size: 15px;
+  pointer-events: none;
+  transition: opacity 0.4s ease;
+}
+
+#boot.hidden {
+  opacity: 0;
+}
+
+@media (max-width: 700px) {
+  #game {
+    border-radius: 0;
+  }
+}

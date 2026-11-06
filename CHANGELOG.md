@@ -9,6 +9,9 @@ and this project adheres to the
 ## Unreleased
 
 ### Added
+- HTML5 web port (`web/`) in TypeScript + Canvas: self-contained build, touch support,
+  procedural audio, meta-progression, achievements, and an itch.io packaging script.
+- Headless balance simulator and a set of generated screenshots/cover art in `docs/`.
 - Path-based enemy navigation and mixed enemy wave composition.
 - Enemy archetypes (Swarm/Runner/Brute) with armor, rewards, and split-on-death behavior.
 - Tower upgrades up to level 3.
@@ -23,5 +26,7 @@ and this project adheres to the
 
 ### Fixed
 - Escape handling and round transitions now rely on path completion rather than screen-edge checks.
+- GHC warnings in `Render.hs` (partial `head`, ambiguous numeric defaults, shadowed binding) and
+  a redundant Gloss import in `Main.hs`.
 
 ## 0.1.0.0 - YYYY-MM-DD

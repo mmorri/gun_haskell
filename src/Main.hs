@@ -1,7 +1,6 @@
 module Main (main) where
 
 import Graphics.Gloss
-import Graphics.Gloss.Interface.Pure.Game
 import Assets (loadAssets)
 import Game (SimulationState, initSimulation, stepSimulation)
 import Render (drawState, handleEventGloss)

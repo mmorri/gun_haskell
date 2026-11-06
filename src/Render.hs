@@ -62,7 +62,7 @@ drawState assets s = case gamePhase s of
       in Pictures (vLines ++ hLines)
 
     starrySky time =
-      let dots = [(i, -450 + fromIntegral ((i*173) `mod` 900), -270 + fromIntegral ((i*97) `mod` 540)) | i <- [0..70] ]
+      let dots = [(i, -450 + fromIntegral ((i*173) `mod` 900), -270 + fromIntegral ((i*97) `mod` 540)) | i <- [0..70 :: Int] ] :: [(Int, Float, Float)]
       in Pictures
            [ Translate x y $ color (makeColor 1 1 1 (0.15 + 0.15 * sin (time*2 + fromIntegral i))) $ circleSolid (1 + fromIntegral (i `mod` 2))
            | (i,x,y) <- dots ]
@@ -88,9 +88,8 @@ drawState assets s = case gamePhase s of
 
     portalAndBase = case mapPath s of
       [] -> Blank
-      path ->
-        let (sx, sy) = head path
-            (ex, ey) = last path
+      path@((sx, sy):_) ->
+        let (ex, ey) = last path
             portalScale = 0.5 + 0.04 * sin (t*4)
         in Pictures
           [ Translate (realToFrac sx) (realToFrac sy) $ Pictures
@@ -309,7 +308,7 @@ drawState assets s = case gamePhase s of
       let yPos = 168 - fromIntegral idx * 76
           affordable = canAffordGun template s
           isSelected = case selectedGun s of
-            Just t -> templateName t == templateName template
+            Just chosen -> templateName chosen == templateName template
             Nothing -> False
           btnColor
             | isSelected = makeColor 0.30 0.62 0.95 1
@@ -396,6 +395,7 @@ selectGunFromShop x y s
              then cycleTargetingMode s
              else checkGunButtons 0 availableGuns
 
+    checkGunButtons :: Int -> [GunTemplate] -> SimulationState
     checkGunButtons _ [] = s
     checkGunButtons idx (template:rest) =
       let yPos = 168 - fromIntegral idx * 76
@@ -407,8 +407,8 @@ selectGunFromShop x y s
 
 placeGunOnField :: GunTemplate -> Float -> Float -> SimulationState -> SimulationState
 placeGunOnField template x y s =
-  let snapX = fromIntegral (round (x / 40) :: Int) * 40
-      snapY = fromIntegral (round (y / 40) :: Int) * 40
+  let snapX = fromIntegral (round (x / 40) :: Int) * (40 :: Float)
+      snapY = fromIntegral (round (y / 40) :: Int) * (40 :: Float)
       p = (realToFrac snapX, realToFrac snapY)
       newState = addGunAtPosition template p s
   in if points newState /= points s
