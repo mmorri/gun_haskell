@@ -1,4 +1,5 @@
 import {
+  A10,
   ACHIEVEMENTS,
   BASE_POS,
   BOARD,
@@ -6,12 +7,15 @@ import {
   GRID,
   H,
   HUD_H,
+  MARINES,
   META,
   MAX_LEVEL,
   PATH,
   PATH_WIDTH,
   PORTAL_POS,
   SIDEBAR,
+  SUPERS,
+  SUPER_BY_ID,
   TARGET_MODES,
   TOWERS,
   TOWER_BY_KIND,
@@ -22,6 +26,7 @@ import {
   targetLabel,
   enemyShort,
   type EnemyKind,
+  type SuperId,
   type TowerKind,
   type Vec,
 } from "./config";
@@ -38,6 +43,7 @@ import {
   PAUSE_BUTTONS,
   SETTINGS_BUTTONS,
   START_BTN,
+  SUPER_BUTTONS,
   TITLE_BUTTONS,
   GAMEOVER_BUTTONS,
   metaButtons,
@@ -530,6 +536,9 @@ function drawBoard(ctx: CanvasRenderingContext2D, g: Game, sp: Sprites, time: nu
   // Towers.
   for (const t of g.towers) drawTower(ctx, sp, g, t, time, t.id === g.selected);
 
+  // Temporary marine squad.
+  for (const m of g.marines) drawMarine(ctx, m, time, reduced);
+
   // Enemies.
   for (const e of g.enemies) drawEnemy(ctx, sp, g, e, time, reduced);
 
@@ -539,13 +548,16 @@ function drawBoard(ctx: CanvasRenderingContext2D, g: Game, sp: Sprites, time: nu
   // Bullets.
   for (const b of g.bullets) drawBullet(ctx, sp, b, time);
 
+  // A-10 strafing runs sit on top of the battlefield.
+  for (const s of g.airstrikes) drawAirstrike(ctx, s, time);
+
   // Particles.
   for (const p of g.particles) {
     const k = p.life / p.maxLife;
     if (p.shape === "ring") {
       ctx.beginPath();
-      ctx.arc(p.x, p.y, p.size * (1 + (1 - k) * 2.4), 0, Math.PI * 2);
-      ctx.strokeStyle = alpha(p.color, k * 0.7);
+      ctx.arc(p.x, p.y, p.size * (1 + (1 - k) * 0.8), 0, Math.PI * 2);
+      ctx.strokeStyle = alpha(p.color, k * 0.6);
       ctx.lineWidth = 2.5;
       ctx.stroke();
     } else if (p.shape === "spark") {
@@ -592,6 +604,9 @@ function drawBoard(ctx: CanvasRenderingContext2D, g: Game, sp: Sprites, time: nu
     panel(ctx, g.hover.x - width / 2 - 10, g.hover.y - 58, width + 20, 26, ok ? "rgba(10,40,24,0.95)" : "rgba(48,12,18,0.95)", ok ? C.green : C.red, 8);
     text(ctx, label, g.hover.x, g.hover.y - 45, 12, ok ? C.green : C.red, 700, "center");
   }
+
+  // Superpower aiming overlay.
+  drawAimPreview(ctx, g, time);
 
   // Vignette.
   const vig = ctx.createRadialGradient(BOARD.x + BOARD.w / 2, BOARD.y + BOARD.h / 2, BOARD.h * 0.35, BOARD.x + BOARD.w / 2, BOARD.y + BOARD.h / 2, BOARD.w * 0.72);
@@ -1306,6 +1321,414 @@ function drawBeam(ctx: CanvasRenderingContext2D, pts: Vec[], color: string, k: n
 // HUD + sidebar
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Superpowers: marines, A-10 runs, aiming overlay
+// ---------------------------------------------------------------------------
+
+function drawMarine(ctx: CanvasRenderingContext2D, m: Game["marines"][number], time: number, reduced: boolean): void {
+  const lifeK = clamp(m.life / m.maxLife, 0, 1);
+  const dropK = clamp(m.age / MARINES.dropTime, 0, 1);
+  const falling = m.age < MARINES.dropTime;
+  const yOff = falling ? -52 * Math.pow(1 - dropK, 2) : 0;
+  const alphaK = falling ? 0.35 + dropK * 0.65 : 1;
+  const x = m.pos.x;
+  const y = m.pos.y + yOff;
+  const bob = reduced || falling ? 0 : Math.sin(time * 9 + m.id) * 0.7;
+  const lifeColor = lifeK > 0.5 ? C.green : lifeK > 0.22 ? C.gold : C.red;
+
+  // Ground shadow.
+  ctx.beginPath();
+  ctx.ellipse(m.pos.x + 1, m.pos.y + 7, 8, 3.5, 0, 0, Math.PI * 2);
+  ctx.fillStyle = "rgba(0,0,0,0.4)";
+  ctx.fill();
+
+  // Remaining lifetime ring.
+  if (!falling) {
+    ctx.beginPath();
+    ctx.arc(m.pos.x, m.pos.y + 6, 11, 0, Math.PI * 2);
+    ctx.strokeStyle = "rgba(10,16,26,0.7)";
+    ctx.lineWidth = 2.4;
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(m.pos.x, m.pos.y + 6, 11, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * lifeK);
+    ctx.strokeStyle = alpha(lifeColor, 0.85);
+    ctx.lineWidth = 2.4;
+    ctx.stroke();
+  }
+
+  ctx.save();
+  ctx.globalAlpha = alphaK;
+  ctx.translate(x, y + bob);
+
+  // Parachute during the drop.
+  if (falling) {
+    ctx.beginPath();
+    ctx.arc(0, -30, 15, Math.PI, 0);
+    ctx.closePath();
+    ctx.fillStyle = alpha("#7fffd4", 0.28);
+    ctx.fill();
+    ctx.strokeStyle = alpha("#b8fff0", 0.8);
+    ctx.lineWidth = 1.4;
+    ctx.stroke();
+    line(ctx, -13, -30, -4, -10, alpha("#b8fff0", 0.65), 1);
+    line(ctx, 13, -30, 4, -10, alpha("#b8fff0", 0.65), 1);
+  }
+
+  // Legs.
+  line(ctx, -3, 4, -5, 11, "#24384a", 2.6);
+  line(ctx, 3, 4, 5, 11, "#24384a", 2.6);
+
+  // Armour torso.
+  rr(ctx, -5.5, -5, 11, 11, 3.4);
+  const g = ctx.createLinearGradient(0, -5, 0, 6);
+  g.addColorStop(0, "#8fffe0");
+  g.addColorStop(1, "#2f8a72");
+  ctx.fillStyle = g;
+  ctx.fill();
+  ctx.strokeStyle = "#10241f";
+  ctx.lineWidth = 1.3;
+  ctx.stroke();
+
+  // Helmet.
+  ctx.beginPath();
+  ctx.arc(0, -6, 5, 0, Math.PI * 2);
+  ctx.fillStyle = "#d9fff5";
+  ctx.fill();
+  ctx.strokeStyle = "#10241f";
+  ctx.lineWidth = 1.2;
+  ctx.stroke();
+
+  // Visor points at the target.
+  ctx.save();
+  ctx.rotate(m.angle);
+  ctx.beginPath();
+  ctx.arc(0, -6, 3.3, -0.72, 0.72);
+  ctx.strokeStyle = "#0d3a30";
+  ctx.lineWidth = 1.8;
+  ctx.stroke();
+
+  // Rifle + muzzle flash, kicked back on recoil.
+  const kick = m.recoil * 2.2;
+  line(ctx, 3 - kick, 0, 17 - kick, 0, "#d7e2f2", 2.6);
+  line(ctx, 6 - kick, -1.5, 13 - kick, -1.5, "#7d8da6", 1.2);
+  if (m.recoil > 0.45) {
+    ctx.beginPath();
+    ctx.moveTo(18 - kick, 0);
+    ctx.lineTo(24 - kick, -3.5);
+    ctx.lineTo(22 - kick, 0);
+    ctx.lineTo(24 - kick, 3.5);
+    ctx.closePath();
+    ctx.fillStyle = "#fff3b0";
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(19 - kick, 0, 4, 0, Math.PI * 2);
+    ctx.fillStyle = alpha("#ffe27a", 0.45);
+    ctx.fill();
+  }
+  ctx.restore();
+
+  ctx.restore();
+}
+
+function planePath(ctx: CanvasRenderingContext2D, scale = 1): void {
+  ctx.beginPath();
+  ctx.moveTo(24 * scale, 0);
+  ctx.lineTo(11 * scale, -5 * scale);
+  ctx.lineTo(3 * scale, -7 * scale);
+  ctx.lineTo(-6 * scale, -26 * scale);
+  ctx.lineTo(-14 * scale, -26 * scale);
+  ctx.lineTo(-12 * scale, -7 * scale);
+  ctx.lineTo(-22 * scale, -9 * scale);
+  ctx.lineTo(-22 * scale, -4 * scale);
+  ctx.lineTo(-27 * scale, 0);
+  ctx.lineTo(-22 * scale, 4 * scale);
+  ctx.lineTo(-22 * scale, 9 * scale);
+  ctx.lineTo(-12 * scale, 7 * scale);
+  ctx.lineTo(-14 * scale, 26 * scale);
+  ctx.lineTo(-6 * scale, 26 * scale);
+  ctx.lineTo(3 * scale, 7 * scale);
+  ctx.lineTo(11 * scale, 5 * scale);
+  ctx.closePath();
+}
+
+function drawAirstrike(ctx: CanvasRenderingContext2D, s: Game["airstrikes"][number], time: number): void {
+  const angle = Math.atan2(s.dir.y, s.dir.x);
+  const nx = -s.dir.y;
+  const ny = s.dir.x;
+  const radius = A10.radius;
+
+  ctx.save();
+
+  // Faint danger corridor.
+  ctx.beginPath();
+  ctx.moveTo(s.start.x + nx * radius, s.start.y + ny * radius);
+  ctx.lineTo(s.end.x + nx * radius, s.end.y + ny * radius);
+  ctx.lineTo(s.end.x - nx * radius, s.end.y - ny * radius);
+  ctx.lineTo(s.start.x - nx * radius, s.start.y - ny * radius);
+  ctx.closePath();
+  ctx.fillStyle = "rgba(255,226,122,0.06)";
+  ctx.fill();
+  ctx.setLineDash([10, 12]);
+  line(ctx, s.start.x, s.start.y, s.end.x, s.end.y, "rgba(255,226,122,0.25)", 1.5);
+  ctx.setLineDash([]);
+
+  // Plane shadow on the ground.
+  ctx.save();
+  ctx.translate(s.pos.x + 8, s.pos.y + 11);
+  ctx.rotate(angle);
+  planePath(ctx, 0.95);
+  ctx.fillStyle = "rgba(0,0,0,0.32)";
+  ctx.fill();
+  ctx.restore();
+
+  // Exhaust trail.
+  const trail = 30 + Math.sin(time * 40) * 6;
+  line(ctx, s.pos.x - s.dir.x * 32, s.pos.y - s.dir.y * 32, s.pos.x - s.dir.x * (32 + trail), s.pos.y - s.dir.y * (32 + trail), alpha("#7fe7ff", 0.22), 4);
+
+  // The aircraft itself.
+  ctx.translate(s.pos.x, s.pos.y);
+  ctx.rotate(angle);
+  planePath(ctx, 0.95);
+  const body = ctx.createLinearGradient(0, -24, 0, 24);
+  body.addColorStop(0, "#d6e0ef");
+  body.addColorStop(0.45, "#8e9cb5");
+  body.addColorStop(1, "#4a5872");
+  ctx.fillStyle = body;
+  ctx.fill();
+  ctx.strokeStyle = "#0b1220";
+  ctx.lineWidth = 1.8;
+  ctx.stroke();
+
+  // Engine pods.
+  for (const sy of [-1, 1]) {
+    ctx.beginPath();
+    ctx.ellipse(-3, sy * 12, 4.2, 7.5, 0, 0, Math.PI * 2);
+    ctx.fillStyle = "#2d3a52";
+    ctx.fill();
+    ctx.strokeStyle = "#0b1220";
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(-3, sy * 17, 2.4, 0, Math.PI * 2);
+    ctx.fillStyle = alpha("#ffb066", 0.75);
+    ctx.fill();
+  }
+
+  // Cockpit.
+  ctx.beginPath();
+  ctx.ellipse(10, 0, 4.6, 3.2, 0, 0, Math.PI * 2);
+  ctx.fillStyle = "#6fe3ff";
+  ctx.fill();
+  ctx.strokeStyle = "#0b1220";
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  // Nose cannon + muzzle flash.
+  ctx.beginPath();
+  ctx.moveTo(20, -1.5);
+  ctx.lineTo(30, -1.5);
+  ctx.lineTo(30, 1.5);
+  ctx.lineTo(20, 1.5);
+  ctx.closePath();
+  ctx.fillStyle = "#202b3f";
+  ctx.fill();
+  const flash = 0.55 + Math.sin(time * 70) * 0.3;
+  ctx.beginPath();
+  ctx.moveTo(30, 0);
+  ctx.lineTo(39, -4.5);
+  ctx.lineTo(35, 0);
+  ctx.lineTo(39, 4.5);
+  ctx.closePath();
+  ctx.fillStyle = alpha("#fff0a8", flash);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(31, 0, 5, 0, Math.PI * 2);
+  ctx.fillStyle = alpha("#ffe27a", flash * 0.5);
+  ctx.fill();
+
+  ctx.restore();
+}
+
+function drawAimPill(ctx: CanvasRenderingContext2D, label: string, x: number, y: number, color: string): void {
+  ctx.font = font(11, 700);
+  const w = ctx.measureText(label).width;
+  const px = clamp(x, BOARD.x + w / 2 + 16, BOARD.x + BOARD.w - w / 2 - 16);
+  const py = clamp(y, BOARD.y + 38, BOARD.y + BOARD.h - 34);
+  panel(ctx, px - w / 2 - 11, py - 14, w + 22, 28, "rgba(8,14,26,0.94)", alpha(color, 0.65), 8);
+  text(ctx, label, px, py, 11, color, 800, "center");
+}
+
+function drawAimPreview(ctx: CanvasRenderingContext2D, g: Game, time: number): void {
+  if (!g.aim) return;
+  const p = {
+    x: clamp(g.mouse.x, BOARD.x + 18, BOARD.x + BOARD.w - 18),
+    y: clamp(g.mouse.y, BOARD.y + 18, BOARD.y + BOARD.h - 18),
+  };
+  const def = SUPER_BY_ID[g.aim.kind];
+
+  if (g.aim.kind === "a10") {
+    if (!g.aim.start) {
+      const pulse = 15 + Math.sin(time * 6) * 2;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, pulse, 0, Math.PI * 2);
+      ctx.strokeStyle = alpha(def.color, 0.85);
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      line(ctx, p.x - 22, p.y, p.x - 8, p.y, alpha(def.color, 0.8), 2);
+      line(ctx, p.x + 8, p.y, p.x + 22, p.y, alpha(def.color, 0.8), 2);
+      line(ctx, p.x, p.y - 22, p.x, p.y - 8, alpha(def.color, 0.8), 2);
+      line(ctx, p.x, p.y + 8, p.x, p.y + 22, alpha(def.color, 0.8), 2);
+      drawAimPill(ctx, "A-10 · click START point", p.x, p.y - 42, def.color);
+      return;
+    }
+
+    const start = g.aim.start;
+    const dx = p.x - start.x;
+    const dy = p.y - start.y;
+    const len = Math.hypot(dx, dy) || 1;
+    const dirx = dx / len;
+    const diry = dy / len;
+    const nx = -diry;
+    const ny = dirx;
+
+    // Corridor preview.
+    ctx.beginPath();
+    ctx.moveTo(start.x + nx * A10.radius, start.y + ny * A10.radius);
+    ctx.lineTo(p.x + nx * A10.radius, p.y + ny * A10.radius);
+    ctx.lineTo(p.x - nx * A10.radius, p.y - ny * A10.radius);
+    ctx.lineTo(start.x - nx * A10.radius, start.y - ny * A10.radius);
+    ctx.closePath();
+    ctx.fillStyle = alpha(def.color, 0.09);
+    ctx.fill();
+
+    ctx.setLineDash([11, 8]);
+    line(ctx, start.x, start.y, p.x, p.y, alpha(def.color, 0.8), 2);
+    ctx.setLineDash([]);
+
+    // Start marker.
+    ctx.beginPath();
+    ctx.arc(start.x, start.y, 10, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(8,14,26,0.9)";
+    ctx.fill();
+    ctx.strokeStyle = def.color;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(start.x, start.y, 3.4, 0, Math.PI * 2);
+    ctx.fillStyle = def.color;
+    ctx.fill();
+
+    // Arrowhead at the end.
+    ctx.beginPath();
+    ctx.moveTo(p.x, p.y);
+    ctx.lineTo(p.x - dirx * 16 + nx * 8, p.y - diry * 16 + ny * 8);
+    ctx.lineTo(p.x - dirx * 16 - nx * 8, p.y - diry * 16 - ny * 8);
+    ctx.closePath();
+    ctx.fillStyle = def.color;
+    ctx.fill();
+
+    // Ghost plane at the midpoint for flavour.
+    ctx.save();
+    ctx.translate((start.x + p.x) / 2, (start.y + p.y) / 2);
+    ctx.rotate(Math.atan2(diry, dirx));
+    ctx.globalAlpha = 0.5;
+    planePath(ctx, 0.62);
+    ctx.fillStyle = def.color;
+    ctx.fill();
+    ctx.restore();
+
+    drawAimPill(ctx, "click END point · right-click cancels", p.x, p.y - 38, def.color);
+    return;
+  }
+
+  // Marine drop preview.
+  drawRange(ctx, p, MARINES.range, def.color, 0.07);
+  ctx.setLineDash([7, 7]);
+  ctx.beginPath();
+  ctx.arc(p.x, p.y, MARINES.formation + 9, 0, Math.PI * 2);
+  ctx.strokeStyle = alpha(def.color, 0.8);
+  ctx.lineWidth = 1.8;
+  ctx.stroke();
+  ctx.setLineDash([]);
+  for (let i = 0; i < MARINES.count; i++) {
+    const a = -Math.PI / 2 + (i / MARINES.count) * Math.PI * 2;
+    const mx = p.x + Math.cos(a) * MARINES.formation;
+    const my = p.y + Math.sin(a) * MARINES.formation;
+    ctx.beginPath();
+    ctx.arc(mx, my, 3.2, 0, Math.PI * 2);
+    ctx.fillStyle = def.color;
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(mx, my, 7, 0, Math.PI * 2);
+    ctx.strokeStyle = alpha(def.color, 0.5);
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+  }
+  drawAimPill(ctx, "click to drop 5 marines · right-click cancels", p.x, p.y - 52, def.color);
+}
+
+function drawSuperIcon(ctx: CanvasRenderingContext2D, kind: SuperId, x: number, y: number, size: number, color: string): void {
+  ctx.save();
+  ctx.translate(x, y);
+  if (kind === "a10") {
+    ctx.rotate(-0.12);
+    planePath(ctx, size / 46);
+    ctx.fillStyle = color;
+    ctx.fill();
+    ctx.strokeStyle = "#0b1220";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  } else {
+    const r = size * 0.09;
+    for (let i = 0; i < 5; i++) {
+      const a = -Math.PI / 2 + (i / 5) * Math.PI * 2;
+      ctx.beginPath();
+      ctx.arc(Math.cos(a) * size * 0.28, Math.sin(a) * size * 0.28, r, 0, Math.PI * 2);
+      ctx.fillStyle = color;
+      ctx.fill();
+      ctx.strokeStyle = "#0b1220";
+      ctx.lineWidth = 0.8;
+      ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
+
+function drawSuperButton(ctx: CanvasRenderingContext2D, g: Game, b: Hit, hover: string | null): void {
+  const id = b.id.slice(6) as SuperId;
+  const def = SUPER_BY_ID[id];
+  const remaining = g.supers[id];
+  const active = g.aim?.kind === id;
+  const ready = remaining <= 0 && g.phase === "combat";
+  const isHover = hover === b.id;
+  const bg = active ? "rgba(30,86,120,0.95)" : isHover ? "#1c2a47" : "#111a2d";
+  const border = active ? C.cyan : ready ? alpha(def.color, 0.55) : C.line;
+
+  panel(ctx, b.x, b.y, b.w, b.h, bg, border, 9);
+
+  ctx.save();
+  ctx.globalAlpha = ready || active ? 1 : 0.45;
+  drawSuperIcon(ctx, id, b.x + 17, b.y + 18, 24, active ? C.cyan : def.color);
+  ctx.restore();
+
+  text(ctx, def.short, b.x + 32, b.y + 13, id === "marines" ? 8.5 : 10, ready || active ? C.ink : C.dim, 800);
+  const sub = active
+    ? id === "a10" && g.aim?.start
+      ? "PICK END"
+      : "PICK SPOT"
+    : remaining > 0
+      ? Math.ceil(remaining) + "s"
+      : def.hotkey + " READY";
+  text(ctx, sub, b.x + 32, b.y + 26, 7.5, active ? C.cyan : ready ? alpha(def.color, 0.95) : C.faint, 700);
+
+  if (remaining > 0) {
+    const done = clamp(1 - remaining / def.cooldown, 0, 1);
+    rr(ctx, b.x + 4, b.y + b.h - 4, (b.w - 8) * done, 2, 1);
+    ctx.fillStyle = alpha(def.color, 0.65);
+    ctx.fill();
+  }
+}
+
 function drawHud(ctx: CanvasRenderingContext2D, g: Game, hover: string | null, muted: boolean): void {
   const hg = ctx.createLinearGradient(0, 0, 0, HUD_H);
   hg.addColorStop(0, "#0c1526");
@@ -1352,6 +1775,9 @@ function drawHud(ctx: CanvasRenderingContext2D, g: Game, hover: string | null, m
   } else if (g.phase === "shop") {
     text(ctx, "SHOP PHASE", 600, 32, 13, C.green, 800);
   }
+
+  // Superpower buttons.
+  for (const b of SUPER_BUTTONS) drawSuperButton(ctx, g, b, hover);
 
   // HUD buttons.
   for (const b of HUD_BUTTONS) {
@@ -1472,6 +1898,7 @@ function drawCombatSidebar(ctx: CanvasRenderingContext2D, g: Game, hover: string
   const tips = [
     "Click a tower to inspect it.",
     "Its targeting mode can be changed mid-wave.",
+    "Q and E are superpowers. Use them mid-wave.",
     "F toggles double speed. No judgement.",
     "Crystal hugs are a limited resource.",
     "Brutes split. Finish the job twice.",
@@ -1764,19 +2191,23 @@ function drawHelp(ctx: CanvasRenderingContext2D): void {
     "6. Survive. Cash and waves keep growing.",
     "7. Repeat until the crystal gets hugged.",
   ];
-  loop.forEach((s, i) => text(ctx, s, 84, 204 + i * 26, 12, C.ink, 500));
+  loop.forEach((s, i) => text(ctx, s, 84, 204 + i * 24, 12, C.ink, 500));
 
-  text(ctx, "CONTROLS", 84, 400, 13, C.cyan, 900);
+  text(ctx, "SUPERPOWERS", 84, 376, 13, C.cyan, 900);
+  text(ctx, "Q · A-10 WARTHOG — click a start point, then an end point. It strafes the line.", 84, 400, 11, C.ink, 500);
+  text(ctx, "E · MARINE DROP — click a spot. 5 marines, 5 seconds of ridiculous fire rate.", 84, 422, 11, C.ink, 500);
+
+  text(ctx, "CONTROLS", 84, 452, 13, C.cyan, 900);
   const controls: [string, string][] = [
     ["1 – 6", "pick a tower"],
     ["SPACE", "start wave / pause"],
     ["F", "1x / 2x speed"],
     ["ESC", "pause, cancel placement"],
-    ["CLICK TOWER", "inspect + retarget"],
+    ["Q / E", "superpowers"],
     ["M", "mute"],
   ];
   controls.forEach(([k, v], i) => {
-    const y = 430 + i * 27;
+    const y = 478 + i * 25;
     panel(ctx, 84, y - 11, 96, 22, "#16203a", C.line, 6);
     text(ctx, k, 132, y, 9, C.gold, 800, "center");
     text(ctx, v, 194, y, 11, C.ink, 500);

@@ -12,7 +12,9 @@ export type SfxName =
   | "over"
   | "click"
   | "place"
-  | "select";
+  | "select"
+  | "a10"
+  | "marine";
 
 const BASS = [55, 55, 43.65, 43.65, 65.41, 65.41, 49, 49];
 
@@ -164,6 +166,14 @@ export class AudioEngine {
         break;
       case "select":
         this.tone(520, 0.04, "square", 0.02, 660);
+        break;
+      case "a10":
+        this.noise(0.16, 0.1, 1900);
+        this.tone(150, 0.14, "sawtooth", 0.045, 70);
+        break;
+      case "marine":
+        this.tone(540, 0.045, "square", 0.028, 320);
+        this.noise(0.045, 0.018, 2400);
         break;
     }
   }

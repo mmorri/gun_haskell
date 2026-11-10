@@ -4,7 +4,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-npm run build
+npm run dist
 
 OUT="$(cd .. && pwd)/docs/pew-pew-defense-deluxe-web.zip"
 rm -f "$OUT"

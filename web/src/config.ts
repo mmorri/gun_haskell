@@ -181,6 +181,75 @@ export function upgradeCost(t: { def: TowerDef; level: number; spent: number }):
 export const MAX_LEVEL = 3;
 
 // ---------------------------------------------------------------------------
+// Superpowers
+// ---------------------------------------------------------------------------
+
+export type SuperId = "a10" | "marines";
+
+export interface SuperDef {
+  id: SuperId;
+  name: string;
+  short: string;
+  desc: string;
+  hint: string;
+  cooldown: number;
+  color: string;
+  accent: string;
+  hotkey: string;
+}
+
+export const SUPERS: SuperDef[] = [
+  {
+    id: "a10",
+    name: "A-10 Warthog",
+    short: "A-10",
+    desc: "Draw a strafing line. The plane handles the rest.",
+    hint: "click a start point, then an end point",
+    cooldown: 38,
+    color: "#ffe27a",
+    accent: "#c99a1c",
+    hotkey: "Q",
+  },
+  {
+    id: "marines",
+    name: "Marine Drop",
+    short: "Marines",
+    desc: "Drop 5 marines with 5 seconds of absurd fire rate.",
+    hint: "click a drop point",
+    cooldown: 44,
+    color: "#7fffd4",
+    accent: "#25a97c",
+    hotkey: "E",
+  },
+];
+
+export const SUPER_BY_ID = Object.fromEntries(SUPERS.map((s) => [s.id, s])) as Record<SuperId, SuperDef>;
+
+export const A10 = {
+  speed: 640,
+  damage: 230,
+  radius: 54,
+  margin: 280,
+  tick: 0.055,
+};
+
+export const MARINES = {
+  count: 5,
+  life: 5,
+  damage: 5,
+  cd: 0.09,
+  range: 190,
+  formation: 34,
+  dropTime: 0.45,
+};
+
+/** Superpowers grow with the wave so they stay relevant past wave 20. */
+export function powerScale(wave: number): number {
+  return 1 + Math.max(0, wave - 1) * 0.16;
+}
+
+
+// ---------------------------------------------------------------------------
 // Enemies
 // ---------------------------------------------------------------------------
 

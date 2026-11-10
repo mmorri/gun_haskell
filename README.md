@@ -80,6 +80,9 @@ screenshots are in `docs/`.
 The web port keeps all its balance tables in `web/src/config.ts` and ships with a headless
 balance simulator (`cd web && node sim-run.mjs`).
 
+Web-only extras: two combat superpowers — an **A-10 strafing run** (draw a start and end
+point with `Q`) and a **5-marine drop** with five seconds of absurd fire rate (`E`).
+
 ## Desktop Build
 
 ```bash

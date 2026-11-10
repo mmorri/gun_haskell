@@ -1,13 +1,17 @@
 import { loadSprites, type Sprites } from "./assets";
 import { AudioEngine, type SfxName } from "./audio";
-import { H, MAX_LEVEL, TOWERS, W, dist, type MetaId, type TowerKind, type Vec } from "./config";
+import { H, MAX_LEVEL, SUPER_BY_ID, TOWERS, W, dist, type MetaId, type SuperId, type TowerKind, type Vec } from "./config";
 import { render } from "./draw";
 import {
   addText,
+  aimSuper,
+  beginSuper,
   bulletsHit,
   bulletsMade,
+  cancelSuper,
   cellAt,
   shotsFired,
+  debugSuper,
   debugTowerRanges,
   createGame,
   cycleTarget,
@@ -124,7 +128,7 @@ function updatePointer(p: Vec): void {
     screen === "playing" &&
     !game.paused &&
     game.towers.some((t) => dist(t.pos, p) < 24);
-  canvas.style.cursor = hover || overTower ? "pointer" : game.placing ? "crosshair" : "default";
+  canvas.style.cursor = hover || overTower ? "pointer" : game.placing || game.aim ? "crosshair" : "default";
 }
 
 // ---------------------------------------------------------------------------
@@ -217,6 +221,11 @@ function handleClick(p: Vec): void {
   }
   if (screen !== "playing" || game.paused) return;
 
+  if (game.aim) {
+    if (hit(BOARD_HIT, p.x, p.y)) aimSuper(game, p);
+    return;
+  }
+
   if (hit(BOARD_HIT, p.x, p.y)) {
     if (game.placing) {
       const cell = cellAt(p);
@@ -250,6 +259,22 @@ function handleClick(p: Vec): void {
 
 function handleButton(id: string): void {
   audio.unlock();
+  if (id.startsWith("super:")) {
+    const kind = id.slice(6) as SuperId;
+    const def = SUPER_BY_ID[kind];
+    if (game.phase !== "combat") {
+      showToast(def.short + " is combat-only — start a wave first");
+      audio.sfx("click");
+      return;
+    }
+    if (game.supers[kind] > 0) {
+      showToast(def.short + " recharging — " + Math.ceil(game.supers[kind]) + "s");
+      audio.sfx("click");
+      return;
+    }
+    beginSuper(game, kind);
+    return;
+  }
   if (id.startsWith("tower:")) {
     const kind = id.slice(6) as TowerKind;
     if (game.placing !== kind) {
@@ -262,6 +287,7 @@ function handleButton(id: string): void {
     }
     game.placing = game.placing === kind ? null : kind;
     game.selected = null;
+    game.aim = null;
     audio.sfx("select");
     return;
   }
@@ -397,6 +423,7 @@ canvas.addEventListener("pointerdown", (e) => {
   if (e.button === 2) {
     game.placing = null;
     game.selected = null;
+    cancelSuper(game);
     return;
   }
   if (e.button !== 0) return;
@@ -407,6 +434,7 @@ canvas.addEventListener("contextmenu", (e) => {
   e.preventDefault();
   game.placing = null;
   game.selected = null;
+  cancelSuper(game);
 });
 
 window.addEventListener("keydown", (e) => {
@@ -425,7 +453,8 @@ window.addEventListener("keydown", (e) => {
 
   if (k === "escape") {
     if (screen === "playing") {
-      if (game.placing) game.placing = null;
+      if (game.aim) cancelSuper(game);
+      else if (game.placing) game.placing = null;
       else if (game.selected !== null) game.selected = null;
       else togglePause();
     } else if (screen !== "title") {
@@ -449,6 +478,16 @@ window.addEventListener("keydown", (e) => {
   if (k === "f") {
     game.speed = game.speed > 1 ? 1 : 2;
     audio.sfx("click");
+    return;
+  }
+
+  if (k === "q") {
+    handleButton("super:a10");
+    return;
+  }
+
+  if (k === "e") {
+    handleButton("super:marines");
     return;
   }
 
@@ -530,6 +569,10 @@ if (new URLSearchParams(location.search).has("debug")) {
       hits: bulletsHit,
       towerState: debugTowerRanges(game),
       enemyState: game.enemies.slice(0, 4).map((e) => ({ kind: e.kind, x: Math.round(e.pos.x), y: Math.round(e.pos.y), hp: Math.round(e.hp), alive: e.alive })),
+      supers: { ...game.supers },
+      aim: game.aim,
+      marines: game.marines.length,
+      airstrikes: game.airstrikes.length,
       save,
     }),
     forceOver: () => {
@@ -549,6 +592,12 @@ if (new URLSearchParams(location.search).has("debug")) {
     },
     setWave: (n: number) => {
       game.wave = n;
+    },
+    a10: (x1: number, y1: number, x2: number, y2: number) => {
+      debugSuper(game, "a10", [{ x: x1, y: y1 }, { x: x2, y: y2 }]);
+    },
+    dropMarines: (x: number, y: number) => {
+      debugSuper(game, "marines", [{ x, y }]);
     },
   };
 }

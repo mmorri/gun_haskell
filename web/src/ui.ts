@@ -47,6 +47,12 @@ export const HUD_BUTTONS: Hit[] = [
   { id: "menu", x: 1200, y: 14, w: 68, h: 36 },
 ];
 
+// Superpower buttons sit between the wave progress and the system buttons.
+export const SUPER_BUTTONS: Hit[] = [
+  { id: "super:a10", x: 796, y: 14, w: 86, h: 36 },
+  { id: "super:marines", x: 888, y: 14, w: 86, h: 36 },
+];
+
 export const PAUSE_BUTTONS: Hit[] = [
   { id: "resume", x: W / 2 - 140, y: 322, w: 280, h: 54 },
   { id: "restart", x: W / 2 - 140, y: 388, w: 280, h: 54 },
@@ -68,7 +74,12 @@ export function inspectorButtons(g: Game): Hit[] {
 
 export function playingButtons(g: Game): Hit[] {
   const selected = g.towers.some((t) => t.id === g.selected);
-  return [...HUD_BUTTONS, ...(selected ? inspectorButtons(g) : towerCards()), ...(selected ? [] : [START_BTN])];
+  return [
+    ...HUD_BUTTONS,
+    ...SUPER_BUTTONS,
+    ...(selected ? inspectorButtons(g) : towerCards()),
+    ...(selected ? [] : [START_BTN]),
+  ];
 }
 
 // ---------------------------------------------------------------------------

@@ -1,4 +1,4 @@
-import type { EnemyDef, EnemyKind, TargetMode, TowerDef, TowerKind, Vec } from "./config";
+import type { EnemyDef, EnemyKind, SuperId, TargetMode, TowerDef, TowerKind, Vec } from "./config";
 
 export interface Enemy {
   id: number;
@@ -50,6 +50,36 @@ export interface Bullet {
   slowFactor: number;
   slowDur: number;
   alive: boolean;
+}
+
+export interface Airstrike {
+  id: number;
+  start: Vec;
+  end: Vec;
+  dir: Vec;
+  pos: Vec;
+  t: number;
+  duration: number;
+  fireTimer: number;
+  hit: Set<number>;
+  alive: boolean;
+}
+
+export interface Marine {
+  id: number;
+  pos: Vec;
+  life: number;
+  maxLife: number;
+  age: number;
+  cd: number;
+  angle: number;
+  recoil: number;
+  kills: number;
+}
+
+export interface SuperAim {
+  kind: SuperId;
+  start: Vec | null;
 }
 
 export interface Particle {
@@ -107,6 +137,10 @@ export interface Game {
   towers: Tower[];
   enemies: Enemy[];
   bullets: Bullet[];
+  airstrikes: Airstrike[];
+  marines: Marine[];
+  supers: Record<SuperId, number>;
+  aim: SuperAim | null;
   particles: Particle[];
   texts: FloatText[];
   beams: Beam[];

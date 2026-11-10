@@ -1,14 +1,17 @@
 import {
+  A10,
   BOARD,
   BASE_POS,
   ENEMIES,
   GRID,
+  MARINES,
   MAX_LEVEL,
   PATH,
   PATH_WIDTH,
   SELL_RATE,
   START_CASH,
   START_LIVES,
+  SUPER_BY_ID,
   TOWERS,
   TOWER_BY_KIND,
   clamp,
@@ -17,17 +20,19 @@ import {
   hpScale,
   lerp,
   pathProgressAt,
+  powerScale,
   speedScale,
   rewardScale,
   upgradeCost,
   waveBonus,
   waveInfo,
   type EnemyKind,
+  type SuperId,
   type TowerKind,
   type Vec,
 } from "./config";
 import { metaEffects } from "./save";
-import type { Beam, Bullet, Enemy, Game, Particle, SaveData, Tower } from "./types";
+import type { Airstrike, Beam, Bullet, Enemy, Game, Marine, Particle, SaveData, Tower } from "./types";
 
 const TAU = Math.PI * 2;
 
@@ -55,6 +60,10 @@ export function createGame(save: SaveData): Game {
     towers: [],
     enemies: [],
     bullets: [],
+    airstrikes: [],
+    marines: [],
+    supers: { a10: 0, marines: 0 },
+    aim: null,
     particles: [],
     texts: [],
     beams: [],
@@ -207,6 +216,125 @@ export function cycleTarget(g: Game, id: number): void {
 }
 
 // ---------------------------------------------------------------------------
+// Superpowers
+// ---------------------------------------------------------------------------
+
+export function superReady(g: Game, id: SuperId): boolean {
+  return g.phase === "combat" && !g.paused && g.supers[id] <= 0;
+}
+
+/** Put an ability into targeting mode, or cancel it if it was already active. */
+export function beginSuper(g: Game, id: SuperId): boolean {
+  if (g.phase !== "combat" || g.paused) return false;
+  if (g.supers[id] > 0) return false;
+  g.placing = null;
+  g.selected = null;
+  if (g.aim?.kind === id) {
+    g.aim = null;
+    emit(g, "click");
+    return false;
+  }
+  g.aim = { kind: id, start: null };
+  emit(g, "select");
+  return true;
+}
+
+export function cancelSuper(g: Game): void {
+  if (!g.aim) return;
+  g.aim = null;
+  emit(g, "click");
+}
+
+function clampToBoard(p: Vec): Vec {
+  return {
+    x: clamp(p.x, BOARD.x + 24, BOARD.x + BOARD.w - 24),
+    y: clamp(p.y, BOARD.y + 24, BOARD.y + BOARD.h - 24),
+  };
+}
+
+/** Feed a click into the active ability. Two clicks for A-10, one for marines. */
+export function aimSuper(g: Game, p: Vec): void {
+  if (!g.aim) return;
+  const at = clampToBoard(p);
+
+  if (g.aim.kind === "marines") {
+    deployMarines(g, at);
+    g.supers.marines = SUPER_BY_ID.marines.cooldown;
+    g.aim = null;
+    emit(g, "marine");
+    return;
+  }
+
+  if (!g.aim.start) {
+    g.aim.start = at;
+    emit(g, "select");
+    return;
+  }
+
+  if (dist(g.aim.start, at) < 40) {
+    addText(g, at.x, at.y - 18, "draw a longer line", "#ffe27a", 1.1, 12);
+    emit(g, "click");
+    return;
+  }
+
+  launchAirstrike(g, g.aim.start, at);
+  g.supers.a10 = SUPER_BY_ID.a10.cooldown;
+  g.aim = null;
+  emit(g, "a10");
+}
+
+function launchAirstrike(g: Game, start: Vec, end: Vec): void {
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const len = Math.hypot(dx, dy) || 1;
+  const dir = { x: dx / len, y: dy / len };
+  const pos = { x: start.x - dir.x * A10.margin, y: start.y - dir.y * A10.margin };
+  const total = len + A10.margin * 2;
+
+  g.airstrikes.push({
+    id: g.nextId++,
+    start: { ...start },
+    end: { ...end },
+    dir,
+    pos,
+    t: 0,
+    duration: total / A10.speed,
+    fireTimer: 0,
+    hit: new Set<number>(),
+    alive: true,
+  });
+  ring(g, start.x, start.y, "#ffe27a", 30, 0.5);
+  addText(g, start.x, start.y - 22, "A-10 INBOUND", "#ffe27a", 1.2, 16);
+  g.shake = Math.max(g.shake, 7);
+}
+
+function deployMarines(g: Game, at: Vec): void {
+  for (let i = 0; i < MARINES.count; i++) {
+    const a = -Math.PI / 2 + (i / MARINES.count) * TAU;
+    const pos = clampToBoard({
+      x: at.x + Math.cos(a) * MARINES.formation,
+      y: at.y + Math.sin(a) * MARINES.formation,
+    });
+    const marine: Marine = {
+      id: g.nextId++,
+      pos,
+      life: MARINES.life,
+      maxLife: MARINES.life,
+      age: 0,
+      cd: 0.28 + i * 0.03,
+      angle: -Math.PI / 2,
+      recoil: 0,
+      kills: 0,
+    };
+    g.marines.push(marine);
+    burst(g, pos.x, pos.y, "#7fffd4", 6, 70, 0.4, 2);
+  }
+  ring(g, at.x, at.y, "#7fffd4", 34, 0.55);
+  addText(g, at.x, at.y - 48, "MARINES!", "#7fffd4", 1.2, 18);
+  g.shake = Math.max(g.shake, 5);
+}
+
+// ---------------------------------------------------------------------------
 // Waves
 // ---------------------------------------------------------------------------
 
@@ -222,6 +350,7 @@ export function startWave(g: Game): void {
   g.bossWave = info.boss;
   g.placing = null;
   g.selected = null;
+  g.aim = null;
   g.banner = {
     text: "WAVE " + g.wave,
     sub: info.boss ? "⚠ MEGA CHUNGUS INCOMING ⚠" : "here they come…",
@@ -404,6 +533,9 @@ function leak(g: Game, e: Enemy): void {
     g.phase = "gameover";
     g.selected = null;
     g.placing = null;
+    g.aim = null;
+    g.marines = [];
+    g.airstrikes = [];
     g.banner = null;
     emit(g, "over");
   }
@@ -449,8 +581,8 @@ function predict(e: Enemy, from: Vec, speed: number): Vec {
   const next = PATH[Math.min(e.wp, PATH.length - 1)];
   const d = dist(e.pos, next) || 1;
   const flight = dist(from, e.pos) / Math.max(1, speed);
-  const nx = e.pos.x + ((next.x - e.pos.x) / d) * e.baseSpeed * flight * 0.85;
-  const ny = e.pos.y + ((next.y - e.pos.y) / d) * e.baseSpeed * flight * 0.85;
+  const nx = e.pos.x + ((next.x - e.pos.x) / d) * e.speed * flight * 0.85;
+  const ny = e.pos.y + ((next.y - e.pos.y) / d) * e.speed * flight * 0.85;
   return { x: nx, y: ny };
 }
 
@@ -515,7 +647,7 @@ function fire(g: Game, t: Tower, target: Enemy): void {
     vel: { x: (dx / d) * t.def.projSpeed, y: (dy / d) * t.def.projSpeed },
     speed: t.def.projSpeed,
     damage: stats.damage,
-    life: 2.5,
+    life: t.kind === "yeet" ? Math.min(2.5, dist(muzzle, aim) / Math.max(1, t.def.projSpeed) + 0.08) : 2.5,
     splash: stats.splash,
     slowFactor: t.def.slowFactor ?? 1,
     slowDur: t.def.slowDur ?? 0,
@@ -564,6 +696,11 @@ export function update(g: Game, rawDt: number): void {
 
   const scaled = dt * g.speed;
   g.time += scaled;
+
+  // Ability cooldowns only tick while a wave is running.
+  for (const id of ["a10", "marines"] as SuperId[]) {
+    if (g.supers[id] > 0) g.supers[id] = Math.max(0, g.supers[id] - scaled);
+  }
 
   // Spawn.
   if (g.queue.length > 0) {
@@ -623,6 +760,10 @@ export function update(g: Game, rawDt: number): void {
     if (t.cd < 0) t.cd = 0;
   }
 
+  // Superpowers.
+  updateAirstrikes(g, scaled);
+  updateMarines(g, scaled);
+
   // Bullets.
   for (const b of g.bullets) {
     if (!b.alive) continue;
@@ -674,6 +815,9 @@ export function update(g: Game, rawDt: number): void {
     g.wave = cleared + 1;
     g.phase = "shop";
     g.waveBanked = bonus;
+    g.aim = null;
+    g.marines = [];
+    g.airstrikes = [];
     g.banner = {
       text: "WAVE CLEARED",
       sub: "+$" + bonus + " wave bonus · spend it wisely",
@@ -684,6 +828,119 @@ export function update(g: Game, rawDt: number): void {
   }
 
   for (const e of g.enemies) if (e.flash > 0) e.flash -= dt;
+}
+
+// ---------------------------------------------------------------------------
+// Superpower simulation
+// ---------------------------------------------------------------------------
+
+function updateAirstrikes(g: Game, dt: number): void {
+  for (const s of g.airstrikes) {
+    if (!s.alive) continue;
+    s.t += dt;
+    const lineLen = dist(s.start, s.end) || 1;
+    const entry = { x: s.start.x - s.dir.x * A10.margin, y: s.start.y - s.dir.y * A10.margin };
+    const exit = { x: s.end.x + s.dir.x * A10.margin, y: s.end.y + s.dir.y * A10.margin };
+    const k = clamp(s.t / s.duration, 0, 1);
+    s.pos.x = lerp(entry.x, exit.x, k);
+    s.pos.y = lerp(entry.y, exit.y, k);
+    const progress = (s.t * A10.speed - A10.margin) / lineLen;
+
+    s.fireTimer -= dt;
+    let guard = 0;
+    while (s.fireTimer <= 0 && guard++ < 24) {
+      s.fireTimer += A10.tick;
+
+      // The gun walks down the line: each enemy gets one very bad moment.
+      for (const e of g.enemies) {
+        if (!e.alive || s.hit.has(e.id)) continue;
+        const along = clamp(
+          ((e.pos.x - s.start.x) * s.dir.x + (e.pos.y - s.start.y) * s.dir.y) / lineLen,
+          0,
+          1,
+        );
+        const px = s.start.x + s.dir.x * lineLen * along;
+        const py = s.start.y + s.dir.y * lineLen * along;
+        if (Math.hypot(e.pos.x - px, e.pos.y - py) > A10.radius + e.radius) continue;
+        if (progress < along - 0.02) continue;
+        s.hit.add(e.id);
+        damageEnemy(g, e, A10.damage * powerScale(g.wave));
+        ring(g, e.pos.x, e.pos.y, "#ffe27a", e.radius + 8, 0.3);
+        burst(g, e.pos.x, e.pos.y, "#ffd166", 7, 120, 0.4, 3);
+        g.shake = Math.max(g.shake, 9);
+      }
+
+      // Tracer stream and ground sparks.
+      const spread = (g.rng() - 0.5) * 22;
+      const nose = { x: s.pos.x + s.dir.x * 24, y: s.pos.y + s.dir.y * 24 };
+      const ahead = {
+        x: s.pos.x + s.dir.x * 82 - s.dir.y * spread,
+        y: s.pos.y + s.dir.y * 82 + s.dir.x * spread,
+      };
+      addBeam(g, [nose, ahead], "#fff0a8", 0.07, 2.4, false);
+      if (g.rng() < 0.55) burst(g, ahead.x, ahead.y, "#ffd166", 1, 40, 0.18, 2);
+      if (g.rng() < 0.14) emit(g, "a10");
+    }
+
+    if (k >= 1) s.alive = false;
+  }
+  g.airstrikes = g.airstrikes.filter((s) => s.alive);
+}
+
+function selectUnitTarget(g: Game, pos: Vec, range: number): Enemy | null {
+  let best: Enemy | null = null;
+  let bestD = Infinity;
+  for (const e of g.enemies) {
+    if (!e.alive) continue;
+    const d = dist(pos, e.pos);
+    if (d <= range + e.radius && d < bestD) {
+      bestD = d;
+      best = e;
+    }
+  }
+  return best;
+}
+
+function fireMarine(g: Game, m: Marine, target: Enemy): void {
+  m.cd = MARINES.cd;
+  m.recoil = 1;
+  const angle = Math.atan2(target.pos.y - m.pos.y, target.pos.x - m.pos.x);
+  m.angle = angle;
+  const muzzle = { x: m.pos.x + Math.cos(angle) * 15, y: m.pos.y + Math.sin(angle) * 15 };
+  const spread = (g.rng() - 0.5) * 12;
+  addBeam(
+    g,
+    [muzzle, { x: target.pos.x + spread, y: target.pos.y - spread * 0.5 }],
+    "#b8fff0",
+    0.07,
+    2,
+    false,
+  );
+  ring(g, muzzle.x, muzzle.y, "#7fffd4", 5, 0.1);
+  damageEnemy(g, target, MARINES.damage * g.damageMult * powerScale(g.wave));
+  if (g.rng() < 0.4) burst(g, target.pos.x, target.pos.y, "#d8fff4", 1, 35, 0.15, 1.5);
+  if (g.rng() < 0.08) emit(g, "marine");
+}
+
+function updateMarines(g: Game, dt: number): void {
+  for (const m of g.marines) {
+    m.life -= dt;
+    m.age += dt;
+    m.cd -= dt;
+    m.recoil = Math.max(0, m.recoil - dt * 7);
+    if (m.life <= 0 || m.age < MARINES.dropTime) continue;
+    const target = selectUnitTarget(g, m.pos, MARINES.range);
+    if (!target) continue;
+    const want = Math.atan2(target.pos.y - m.pos.y, target.pos.x - m.pos.x);
+    m.angle = lerpAngle(m.angle, want, Math.min(1, dt * 20));
+    if (m.cd <= 0) fireMarine(g, m, target);
+  }
+  for (const m of g.marines) {
+    if (m.life > 0) continue;
+    burst(g, m.pos.x, m.pos.y, "#7fffd4", 4, 60, 0.35, 2);
+    ring(g, m.pos.x, m.pos.y, "#7fffd4", 10, 0.25);
+  }
+  g.marines = g.marines.filter((m) => m.life > 0);
 }
 
 function boom(g: Game, at: Vec, damage: number, radius: number): void {
@@ -748,6 +1005,17 @@ function lerpAngle(a: number, b: number, t: number): number {
   if (d > Math.PI) d -= TAU;
   if (d < -Math.PI) d += TAU;
   return a + d * t;
+}
+
+export function debugSuper(g: Game, id: SuperId, pts: Vec[]): void {
+  g.supers[id] = 0;
+  if (id === "a10" && pts.length >= 2) {
+    launchAirstrike(g, pts[0], pts[1]);
+    g.supers.a10 = SUPER_BY_ID.a10.cooldown;
+  } else if (id === "marines" && pts.length >= 1) {
+    deployMarines(g, pts[0]);
+    g.supers.marines = SUPER_BY_ID.marines.cooldown;
+  }
 }
 
 export function runSummary(g: Game, save: SaveData) {

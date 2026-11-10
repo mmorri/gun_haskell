@@ -11,6 +11,8 @@ and this project adheres to the
 ### Added
 - HTML5 web port (`web/`) in TypeScript + Canvas: self-contained build, touch support,
   procedural audio, meta-progression, achievements, and an itch.io packaging script.
+- Web superpowers: an A-10 strafing run with player-chosen start/end points (`Q`) and a
+  five-marine drop with five seconds of high fire rate (`E`). Both scale with wave number.
 - Headless balance simulator and a set of generated screenshots/cover art in `docs/`.
 - Path-based enemy navigation and mixed enemy wave composition.
 - Enemy archetypes (Swarm/Runner/Brute) with armor, rewards, and split-on-death behavior.
