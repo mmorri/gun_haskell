@@ -549,8 +549,10 @@ function frame(now: number): void {
 
 let sprites = {} as Sprites;
 
-// Debug hook, opt-in with ?debug. Handy for automated smoke tests.
-if (new URLSearchParams(location.search).has("debug")) {
+// Debug hook, compiled out of production builds. Dev builds enable it with
+// `node build.mjs --debug` (or PEW_DEBUG=1); smoke tests use that build.
+declare const __PEW_DEBUG__: boolean;
+if (__PEW_DEBUG__ && new URLSearchParams(location.search).has("debug")) {
   (window as unknown as { __pew: unknown }).__pew = {
     state: () => ({
       screen,

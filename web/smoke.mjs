@@ -1,3 +1,5 @@
+// Requires a debug build serving dist/ on :8123:
+//   npm run build:debug && (cd dist && python3 -m http.server 8123) & node smoke.mjs
 import { chromium } from "playwright-core";
 
 const browser = await chromium.launch({ executablePath: "/usr/bin/google-chrome-stable", headless: true });

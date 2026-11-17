@@ -22,12 +22,37 @@ export function loadSave(): SaveData {
     const raw = localStorage.getItem(KEY);
     if (!raw) return base;
     const parsed = JSON.parse(raw) as Partial<SaveData>;
+    // localStorage is attacker-writable (XSS, shared machine): coerce every
+    // field to its expected shape instead of trusting stored values.
+    const num = (v: unknown, fallback: number): number =>
+      typeof v === "number" && Number.isFinite(v) ? v : fallback;
+    const meta = parsed.meta ?? {};
+    const settings = parsed.settings ?? {};
     return {
       ...base,
       ...parsed,
-      meta: { ...base.meta, ...(parsed.meta ?? {}) },
-      settings: { ...base.settings, ...(parsed.settings ?? {}) },
-      achievements: Array.isArray(parsed.achievements) ? parsed.achievements : [],
+      bestWave: num(parsed.bestWave, base.bestWave),
+      bestKills: num(parsed.bestKills, base.bestKills),
+      teeth: num(parsed.teeth, base.teeth),
+      runs: num(parsed.runs, base.runs),
+      v: num(parsed.v, base.v),
+      meta: {
+        damage: num(meta.damage, 0),
+        cash: num(meta.cash, 0),
+        lives: num(meta.lives, 0),
+        bounty: num(meta.bounty, 0),
+      },
+      settings: {
+        muted: typeof settings.muted === "boolean" ? settings.muted : base.settings.muted,
+        music: typeof settings.music === "boolean" ? settings.music : base.settings.music,
+        reducedMotion:
+          typeof settings.reducedMotion === "boolean"
+            ? settings.reducedMotion
+            : base.settings.reducedMotion,
+      },
+      achievements: Array.isArray(parsed.achievements)
+        ? parsed.achievements.filter((a): a is string => typeof a === "string")
+        : [],
     };
   } catch {
     return base;

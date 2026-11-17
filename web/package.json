@@ -5,6 +5,7 @@
   "description": "Pew-Pew Defense Deluxe - a tower defense game about gremlins and questionable life choices",
   "scripts": {
     "build": "node build.mjs",
+    "build:debug": "node build.mjs --debug",
     "dev": "node build.mjs --serve",
     "dist": "node build.mjs --minify",
     "sim": "node sim-run.mjs",

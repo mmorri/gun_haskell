@@ -24,6 +24,9 @@ function copyStatic() {
   }
 }
 
+// Debug hook is dev-only: pass PEW_DEBUG=1 for local/smoke builds; production
+// and itch.io builds exclude the cheat hook entirely (dead-code eliminated).
+const debug = process.argv.includes("--debug") || process.env.PEW_DEBUG === "1";
 const options = {
   entryPoints: [resolve(root, "src", "main.ts")],
   bundle: true,
@@ -33,6 +36,7 @@ const options = {
   minify,
   sourcemap: serve ? "inline" : false,
   logLevel: "info",
+  define: { __PEW_DEBUG__: debug ? "true" : "false" },
 };
 
 if (serve) {
