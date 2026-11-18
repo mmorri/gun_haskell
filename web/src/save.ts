@@ -26,8 +26,17 @@ export function loadSave(): SaveData {
     // field to its expected shape instead of trusting stored values.
     const num = (v: unknown, fallback: number): number =>
       typeof v === "number" && Number.isFinite(v) ? v : fallback;
-    const meta = parsed.meta ?? {};
-    const settings = parsed.settings ?? {};
+    const meta = (parsed.meta ?? {}) as {
+      damage?: unknown;
+      cash?: unknown;
+      lives?: unknown;
+      bounty?: unknown;
+    };
+    const settings = (parsed.settings ?? {}) as {
+      muted?: unknown;
+      music?: unknown;
+      reducedMotion?: unknown;
+    };
     return {
       ...base,
       ...parsed,
